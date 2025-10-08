@@ -9,6 +9,11 @@ import SwiftUI
 import PDFKit
 import UIKit
 
+private struct SharePayload: Identifiable {
+    let id = UUID()
+    let items: [Any]
+}
+
 struct InvoiceDetailView: View {
     let invoiceId: UUID
 
@@ -16,9 +21,8 @@ struct InvoiceDetailView: View {
     @State private var isLoading = false
     @State private var error: String?
 
-    // Share state (2-phase presentation to avoid first-time blank sheet)
-    @State private var shareItems: [Any] = []
-    @State private var isPresentingShare = false
+    // Two-phase share state (prevents first-open blank sheet)
+    @State private var sharePayload: SharePayload? = nil
 
     @State private var previewItem: PDFPreviewItem? = nil
 
@@ -69,7 +73,7 @@ struct InvoiceDetailView: View {
                             TotalRow(label: "Total", value: currency(d.total ?? 0, d.currency), bold: true)
                         }
 
-                        // ===== Actions (elongated card with centered, big buttons) =====
+                        // ===== Actions (tall card with centered, big buttons) =====
                         SectionBox(title: "Actions") {
                             VStack(spacing: 16) {
                                 Button {
@@ -117,15 +121,12 @@ struct InvoiceDetailView: View {
         }
         .task { await load() }
 
-        // 2-phase share presentation: show only after items are set and a tiny delay has passed
-        .sheet(isPresented: $isPresentingShare, onDismiss: {
-            // cleanup after sheet closes
-            self.shareItems = []
-        }) {
-            ActivitySheet(items: shareItems) { completed, activityType in
+        // Present after payload is ready; this avoids the first-time blank sheet.
+        .sheet(item: $sharePayload) { payload in
+            ActivitySheet(items: payload.items) { completed, activityType in
                 Task {
                     guard completed else { return }
-                    // Mark sent only if a real sender was used
+                    // Mark sent only for real “sending” activities
                     let senders: Set<String> = [
                         "com.apple.UIKit.activity.Message",
                         "com.apple.UIKit.activity.Mail",
@@ -153,7 +154,6 @@ struct InvoiceDetailView: View {
                 StatusChip(status: displayStatus(dStatus: d.status, sentAt: dSentAt(d)))
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
-                    // Prefer issued_at; fall back to created_at. Both shown as MM/dd/yy.
                     if let issuedOrCreated = (d.issued_at ?? d.created_at) {
                         RowKV(k: "Date", v: shortDate(issuedOrCreated))
                     }
@@ -220,9 +220,8 @@ struct InvoiceDetailView: View {
 
     private func send() async {
         do {
-            // 1) Create/refresh checkout link
-            let url = try await InvoiceService.sendInvoice(id: invoiceId)
-            guard let payURL = url else {
+            // 1) Create/refresh checkout link (require it to exist to proceed)
+            guard let payURL = try await InvoiceService.sendInvoice(id: invoiceId) else {
                 await MainActor.run { self.error = "Could not create payment link." }
                 return
             }
@@ -231,15 +230,28 @@ struct InvoiceDetailView: View {
             guard let d = detail else { return }
             let pdfURL = try PDFGenerator.makeInvoicePDF(detail: d)
 
-            // 3) Phase 1: set items (no presentation yet)
-            await MainActor.run {
-                self.shareItems = [pdfURL, payURL]
+            // 3) Verify the PDF really exists and has size > 0 (prevents blank sheet)
+            let path = pdfURL.path
+            var fileOK = FileManager.default.fileExists(atPath: path)
+            if fileOK {
+                if let sz = try? FileManager.default
+                    .attributesOfItem(atPath: path)[.size] as? NSNumber {
+                    fileOK = sz.intValue > 0
+                }
+            }
+            guard fileOK else {
+                await MainActor.run { self.error = "PDF wasn’t ready. Please try again." }
+                return
             }
 
-            // 4) Phase 2: present after a tiny delay to avoid first-open blank sheet
-            try? await Task.sleep(nanoseconds: 250_000_000) // 0.25s
+            // 4) Phase A: clear any previous payload, then wait a tick
+            await MainActor.run { self.sharePayload = nil }
+            try? await Task.sleep(nanoseconds: 350_000_000) // ~0.35s warms extensions
+
+            // 5) Phase B: set payload which triggers the sheet
             await MainActor.run {
-                self.isPresentingShare = true
+                let items: [Any] = ["Invoice \(d.number)", pdfURL, payURL]
+                self.sharePayload = SharePayload(items: items)
             }
 
         } catch {
@@ -257,24 +269,17 @@ struct InvoiceDetailView: View {
     }
 
     private func shortDate(_ s: String) -> String {
-        // Try common formats (order matters)
         let fmts: [String] = [
             "yyyy-MM-dd",
             "yyyy-MM-dd'T'HH:mm:ssXXXXX",
             "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX",
             "yyyy-MM-dd'T'HH:mm:ssZ"
         ]
-
         let inDF = DateFormatter()
         inDF.locale = Locale(identifier: "en_US_POSIX")
         inDF.timeZone = TimeZone(secondsFromGMT: 0)
-
         var parsed: Date? = nil
-        for f in fmts {
-            inDF.dateFormat = f
-            if let d = inDF.date(from: s) { parsed = d; break }
-        }
-
+        for f in fmts { inDF.dateFormat = f; if let d = inDF.date(from: s) { parsed = d; break } }
         if parsed == nil {
             let iso = ISO8601DateFormatter()
             iso.formatOptions = [.withInternetDateTime]
@@ -284,9 +289,7 @@ struct InvoiceDetailView: View {
                 parsed = iso.date(from: s)
             }
         }
-
         guard let date = parsed else { return s }
-
         let out = DateFormatter()
         out.locale = Locale(identifier: "en_US_POSIX")
         out.timeZone = .current
@@ -295,7 +298,7 @@ struct InvoiceDetailView: View {
     }
 
     private func dSentAt(_ d: InvoiceDetail) -> String? {
-        // If/when you add sent_at into InvoiceDetail, plug it here.
+        // If/when you include sent_at in InvoiceDetail, you can surface it here
         return nil
     }
 
@@ -336,30 +339,26 @@ private struct PDFPreviewSheet: View {
     @State private var shareItems: [Any]? = nil
 
     var body: some View {
-        ZStack {
-            PDFKitView(url: url)
-                .ignoresSafeArea()
-        }
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 12) {
-                Button {
-                    // Share/Download the PDF itself
-                    shareItems = [url]
-                    showShare = true
-                } label: {
-                    Label("Download", systemImage: "square.and.arrow.down")
-                        .frame(maxWidth: .infinity)
-                        .multilineTextAlignment(.center)
+        ZStack { PDFKitView(url: url).ignoresSafeArea() }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 12) {
+                    Button {
+                        shareItems = [url]
+                        showShare = true
+                    } label: {
+                        Label("Download", systemImage: "square.and.arrow.down")
+                            .frame(maxWidth: .infinity)
+                            .multilineTextAlignment(.center)
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.borderedProminent)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
+                .background(.ultraThinMaterial)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 16)
-            .background(.ultraThinMaterial)
-        }
-        .sheet(isPresented: $showShare) {
-            ActivitySheet(items: shareItems ?? [])
-        }
+            .sheet(isPresented: $showShare) {
+                ActivitySheet(items: shareItems ?? [])
+            }
     }
 }
 
