@@ -15,8 +15,11 @@ struct InvoiceDetailView: View {
     @State private var detail: InvoiceDetail?
     @State private var isLoading = false
     @State private var error: String?
-    @State private var shareItems: [Any]? = nil
-    @State private var showShare = false
+
+    // Share state (2-phase presentation to avoid first-time blank sheet)
+    @State private var shareItems: [Any] = []
+    @State private var isPresentingShare = false
+
     @State private var previewItem: PDFPreviewItem? = nil
 
     var body: some View {
@@ -89,7 +92,6 @@ struct InvoiceDetailView: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.vertical, 8)
-                            // Spacer at bottom so the card feels taller
                             Spacer(minLength: 0)
                         }
                         .frame(maxWidth: .infinity)
@@ -114,17 +116,23 @@ struct InvoiceDetailView: View {
             }
         }
         .task { await load() }
-        .sheet(isPresented: $showShare) {
-            ActivitySheet(items: shareItems ?? []) { completed, activityType in
-                guard completed else { return }
-                let senders: Set<String> = [
-                    "com.apple.UIKit.activity.Message",
-                    "com.apple.UIKit.activity.Mail",
-                    "net.whatsapp.WhatsApp.ShareExtension"
-                ]
-                let raw = activityType?.rawValue ?? ""
-                if senders.contains(raw) {
-                    Task {
+
+        // 2-phase share presentation: show only after items are set and a tiny delay has passed
+        .sheet(isPresented: $isPresentingShare, onDismiss: {
+            // cleanup after sheet closes
+            self.shareItems = []
+        }) {
+            ActivitySheet(items: shareItems) { completed, activityType in
+                Task {
+                    guard completed else { return }
+                    // Mark sent only if a real sender was used
+                    let senders: Set<String> = [
+                        "com.apple.UIKit.activity.Message",
+                        "com.apple.UIKit.activity.Mail",
+                        "net.whatsapp.WhatsApp.ShareExtension"
+                    ]
+                    let raw = activityType?.rawValue ?? ""
+                    if senders.contains(raw) {
                         try? await InvoiceService.markSent(id: invoiceId)
                         await load()
                     }
@@ -145,7 +153,7 @@ struct InvoiceDetailView: View {
                 StatusChip(status: displayStatus(dStatus: d.status, sentAt: dSentAt(d)))
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
-                    // Prefer issued_at; fall back to created_at. Both are rendered as MM/dd/yy.
+                    // Prefer issued_at; fall back to created_at. Both shown as MM/dd/yy.
                     if let issuedOrCreated = (d.issued_at ?? d.created_at) {
                         RowKV(k: "Date", v: shortDate(issuedOrCreated))
                     }
@@ -214,8 +222,6 @@ struct InvoiceDetailView: View {
         do {
             // 1) Create/refresh checkout link
             let url = try await InvoiceService.sendInvoice(id: invoiceId)
-
-            // Require a valid link to consider sending
             guard let payURL = url else {
                 await MainActor.run { self.error = "Could not create payment link." }
                 return
@@ -225,11 +231,17 @@ struct InvoiceDetailView: View {
             guard let d = detail else { return }
             let pdfURL = try PDFGenerator.makeInvoicePDF(detail: d)
 
-            // 3) Present share sheet (PDF + link). Marking as 'sent' happens in completion.
+            // 3) Phase 1: set items (no presentation yet)
             await MainActor.run {
                 self.shareItems = [pdfURL, payURL]
-                self.showShare = true
             }
+
+            // 4) Phase 2: present after a tiny delay to avoid first-open blank sheet
+            try? await Task.sleep(nanoseconds: 250_000_000) // 0.25s
+            await MainActor.run {
+                self.isPresentingShare = true
+            }
+
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
         }
@@ -245,12 +257,12 @@ struct InvoiceDetailView: View {
     }
 
     private func shortDate(_ s: String) -> String {
-        // Try several common formats (order matters)
+        // Try common formats (order matters)
         let fmts: [String] = [
-            "yyyy-MM-dd",                     // date only
-            "yyyy-MM-dd'T'HH:mm:ssXXXXX",     // ISO with timezone offset, no millis (e.g. 2025-10-08T00:00:00+00:00)
-            "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX", // ISO with millis
-            "yyyy-MM-dd'T'HH:mm:ssZ"          // ISO with Z offset like +0000
+            "yyyy-MM-dd",
+            "yyyy-MM-dd'T'HH:mm:ssXXXXX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX",
+            "yyyy-MM-dd'T'HH:mm:ssZ"
         ]
 
         let inDF = DateFormatter()
@@ -263,10 +275,9 @@ struct InvoiceDetailView: View {
             if let d = inDF.date(from: s) { parsed = d; break }
         }
 
-        // As a last resort, try ISO8601DateFormatter too
         if parsed == nil {
             let iso = ISO8601DateFormatter()
-            iso.formatOptions = [.withInternetDateTime]  // no fractional seconds
+            iso.formatOptions = [.withInternetDateTime]
             parsed = iso.date(from: s)
             if parsed == nil {
                 iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -274,7 +285,7 @@ struct InvoiceDetailView: View {
             }
         }
 
-        guard let date = parsed else { return s } // fallback to original if unparsable
+        guard let date = parsed else { return s }
 
         let out = DateFormatter()
         out.locale = Locale(identifier: "en_US_POSIX")
@@ -329,7 +340,6 @@ private struct PDFPreviewSheet: View {
             PDFKitView(url: url)
                 .ignoresSafeArea()
         }
-        // Bottom action section (Download only)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 12) {
                 Button {
