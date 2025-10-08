@@ -6,6 +6,15 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		FD00AB262E7D284500D6874A /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = FD00AB252E7D284500D6874A /* Auth */; };
+		FD00AB282E7D284500D6874A /* Functions in Frameworks */ = {isa = PBXBuildFile; productRef = FD00AB272E7D284500D6874A /* Functions */; };
+		FD00AB2A2E7D284500D6874A /* PostgREST in Frameworks */ = {isa = PBXBuildFile; productRef = FD00AB292E7D284500D6874A /* PostgREST */; };
+		FD00AB2C2E7D284500D6874A /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = FD00AB2B2E7D284500D6874A /* Realtime */; };
+		FD00AB2E2E7D284500D6874A /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = FD00AB2D2E7D284500D6874A /* Storage */; };
+		FD00AB302E7D284500D6874A /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = FD00AB2F2E7D284500D6874A /* Supabase */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		FD00AB002E7D157200D6874A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -29,9 +38,22 @@
 		FD00AB092E7D157200D6874A /* InvoiceAmericanoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InvoiceAmericanoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		FD275F7E2E8F3FBA0034D773 /* Exceptions for "InvoiceAmericano" folder in "InvoiceAmericano" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = FD00AAF12E7D157100D6874A /* InvoiceAmericano */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		FD00AAF42E7D157100D6874A /* InvoiceAmericano */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				FD275F7E2E8F3FBA0034D773 /* Exceptions for "InvoiceAmericano" folder in "InvoiceAmericano" target */,
+			);
 			path = InvoiceAmericano;
 			sourceTree = "<group>";
 		};
@@ -52,6 +74,12 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FD00AB2A2E7D284500D6874A /* PostgREST in Frameworks */,
+				FD00AB282E7D284500D6874A /* Functions in Frameworks */,
+				FD00AB302E7D284500D6874A /* Supabase in Frameworks */,
+				FD00AB262E7D284500D6874A /* Auth in Frameworks */,
+				FD00AB2E2E7D284500D6874A /* Storage in Frameworks */,
+				FD00AB2C2E7D284500D6874A /* Realtime in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +140,12 @@
 			);
 			name = InvoiceAmericano;
 			packageProductDependencies = (
+				FD00AB252E7D284500D6874A /* Auth */,
+				FD00AB272E7D284500D6874A /* Functions */,
+				FD00AB292E7D284500D6874A /* PostgREST */,
+				FD00AB2B2E7D284500D6874A /* Realtime */,
+				FD00AB2D2E7D284500D6874A /* Storage */,
+				FD00AB2F2E7D284500D6874A /* Supabase */,
 			);
 			productName = InvoiceAmericano;
 			productReference = FD00AAF22E7D157100D6874A /* InvoiceAmericano.app */;
@@ -195,6 +229,9 @@
 			);
 			mainGroup = FD00AAE92E7D157100D6874A;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				FD00AB242E7D284500D6874A /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = FD00AAF32E7D157100D6874A /* Products */;
 			projectDirPath = "";
@@ -400,6 +437,7 @@
 				DEVELOPMENT_TEAM = Z35YVHVWJ4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InvoiceAmericano/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -432,6 +470,7 @@
 				DEVELOPMENT_TEAM = Z35YVHVWJ4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InvoiceAmericano/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -578,6 +617,50 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		FD00AB242E7D284500D6874A /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		FD00AB252E7D284500D6874A /* Auth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FD00AB242E7D284500D6874A /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Auth;
+		};
+		FD00AB272E7D284500D6874A /* Functions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FD00AB242E7D284500D6874A /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Functions;
+		};
+		FD00AB292E7D284500D6874A /* PostgREST */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FD00AB242E7D284500D6874A /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = PostgREST;
+		};
+		FD00AB2B2E7D284500D6874A /* Realtime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FD00AB242E7D284500D6874A /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Realtime;
+		};
+		FD00AB2D2E7D284500D6874A /* Storage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FD00AB242E7D284500D6874A /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Storage;
+		};
+		FD00AB2F2E7D284500D6874A /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FD00AB242E7D284500D6874A /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = FD00AAEA2E7D157100D6874A /* Project object */;
 }

@@ -47,6 +47,9 @@ struct AuthView: View {
             }
             .padding()
             .navigationTitle("Sign In")
+            .task {
+                await vm.refreshSession()
+            }
         }
     }
 }

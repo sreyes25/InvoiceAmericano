@@ -1,0 +1,107 @@
+//
+//  MainTabView.swift
+//  InvoiceAmericano
+//
+//  Created by Sergio Reyes on 10/2/25.
+//
+
+import SwiftUI
+
+struct MainTabView: View {
+    var body: some View {
+        TabView {
+            // HOME
+            NavigationStack {
+                HomeViewPlaceholder()
+            }
+            .tabItem { Label("Home", systemImage: "house") }
+
+            // INVOICES
+            NavigationStack {
+                InvoiceListView()  
+            }
+            .tabItem { Label("Invoices", systemImage: "doc.plaintext") }
+
+            // CLIENTS
+            NavigationStack {
+                ClientListView()
+            }
+            .tabItem { Label("Clients", systemImage: "person.2") }
+
+            // ACTIVITY
+            NavigationStack {
+                ActivityPlaceholder()
+            }
+            .tabItem { Label("Activity", systemImage: "bell") }
+
+            // ACCOUNT
+            NavigationStack {
+                AccountViewPlaceholder()
+            }
+            .tabItem { Label("Account", systemImage: "person.crop.circle") }
+        }
+    }
+}
+
+// MARK: - Placeholders (replace with your real views when ready)
+
+private struct HomeViewPlaceholder: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Home").font(.title3).bold()
+            Text("Quick actions, KPIs, and recent invoices go here.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Button("New Invoice", action: {})
+                .buttonStyle(.borderedProminent)
+        }
+        .padding()
+        .navigationTitle("Home")
+    }
+}
+
+private struct ClientListPlaceholder: View {
+    var body: some View {
+        List {
+            ForEach(0..<8, id: \.self) { i in
+                VStack(alignment: .leading) {
+                    Text("Client \(i)").bold()
+                    Text("client\(i)@example.com").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("Clients")
+        .toolbar { Button { } label: { Image(systemName: "person.badge.plus") } }
+    }
+}
+
+private struct ActivityPlaceholder: View {
+    var body: some View {
+        List {
+            ForEach(0..<6, id: \.self) { i in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Payment received").bold()
+                    Text("INV-000\(i) paid via Stripe").font(.caption).foregroundStyle(.secondary)
+                    Text(Date().addingTimeInterval(Double(-i) * 3600).formatted())
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("Activity")
+    }
+}
+
+private struct AccountViewPlaceholder: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Account").font(.title3).bold()
+            Text("Profile, preferences, branding, and sign out.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Button("Log Out") {
+                Task { try? await AuthService.signOut() }
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding()
+        .navigationTitle("Account")
+    }
+}
