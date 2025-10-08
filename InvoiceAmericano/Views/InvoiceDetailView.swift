@@ -335,30 +335,60 @@ private struct StatusChip: View {
 private struct PDFPreviewSheet: View {
     let url: URL
     let invoiceId: UUID
-    @State private var showShare = false
-    @State private var shareItems: [Any]? = nil
+
+    // two-phase share payload (prevents first-open blank sheet)
+    private struct SharePayload: Identifiable {
+        let id = UUID()
+        let items: [Any]
+    }
+
+    @State private var payload: SharePayload? = nil
 
     var body: some View {
-        ZStack { PDFKitView(url: url).ignoresSafeArea() }
-            .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 12) {
-                    Button {
-                        shareItems = [url]
-                        showShare = true
-                    } label: {
-                        Label("Download", systemImage: "square.and.arrow.down")
-                            .frame(maxWidth: .infinity)
-                            .multilineTextAlignment(.center)
-                    }
-                    .buttonStyle(.borderedProminent)
+        ZStack {
+            PDFKitView(url: url)
+                .ignoresSafeArea()
+        }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 12) {
+                Button {
+                    Task { await presentDownload() }
+                } label: {
+                    Label("Download", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 16)
-                .background(.ultraThinMaterial)
+                .buttonStyle(.borderedProminent)
             }
-            .sheet(isPresented: $showShare) {
-                ActivitySheet(items: shareItems ?? [])
-            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
+            .background(.ultraThinMaterial)
+        }
+        // present AFTER payload is ready (prevents blank sheet on first try)
+        .sheet(item: $payload) { p in
+            ActivitySheet(items: p.items)
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func presentDownload() async {
+        // 1) Make sure the file exists and has non-zero size
+        let path = url.path
+        var ok = FileManager.default.fileExists(atPath: path)
+        if ok, let size = try? FileManager.default
+            .attributesOfItem(atPath: path)[.size] as? NSNumber {
+            ok = size.intValue > 0
+        }
+        guard ok else { return }
+
+        // 2) Phase A: clear any previous payload, then wait a tick so
+        //    UIActivityViewController can initialize extensions cleanly.
+        await MainActor.run { self.payload = nil }
+        try? await Task.sleep(nanoseconds: 350_000_000) // ~0.35s
+
+        // 3) Phase B: set payload which triggers the sheet
+        await MainActor.run { self.payload = SharePayload(items: [url]) }
     }
 }
 
