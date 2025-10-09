@@ -50,4 +50,24 @@ enum ActivityService {
             .insert(payload)
             .execute()
     }
+
+    // Count unread (where read_at is null)
+    static func countUnread() async throws -> Int {
+        let resp = try await SB.shared.client
+            .from("invoice_activity")
+            .select("id", head: false, count: .exact)
+            .filter("read_at", operator: "is", value: "null")
+            .execute()
+        return resp.count ?? 0
+    }
+
+    // Mark all as read by setting read_at to current timestamp
+    static func markAllAsRead() async throws {
+        let nowISO = ISO8601DateFormatter().string(from: Date())
+        _ = try await SB.shared.client
+            .from("invoice_activity")
+            .update(["read_at": nowISO])
+            .filter("read_at", operator: "is", value: "null")
+            .execute()
+    }
 }

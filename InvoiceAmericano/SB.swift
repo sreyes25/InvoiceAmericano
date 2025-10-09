@@ -20,3 +20,33 @@ final class SB {
 
     }
 }
+
+private struct DeviceTokenInsert: Encodable {
+    let user_id: UUID
+    let token: String
+    let platform: String
+}
+
+extension SB {
+    func registerDeviceToken(_ token: String) async throws {
+        // Safely obtain user ID depending on your SDK version
+        let uid: UUID
+        if let user = client.auth.currentUser {
+            uid = user.id
+        } else if let sessionUser = try? await client.auth.session.user.id {
+            uid = sessionUser
+        } else {
+            print("⚠️ No authenticated user; skipping device token registration")
+            return
+        }
+
+        let payload = DeviceTokenInsert(user_id: uid, token: token, platform: "ios")
+
+        _ = try await client
+            .from("device_tokens")
+            .upsert(payload)
+            .execute()
+
+        print("✅ Device token registered successfully")
+    }
+}

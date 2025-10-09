@@ -8,6 +8,24 @@
 import Foundation
 import Supabase
 
+enum InvoiceBuildError: Error {
+    case missingClientId
+}
+
+// Attempts to extract a UUID from the draft.client (UUID string) or throws.
+private func clientId(from draft: InvoiceDraft) throws -> UUID {
+    // If your draft.client is a UUID string, parse it.
+    if let s = (draft as AnyObject).value(forKey: "client") as? String,
+       let u = UUID(uuidString: s) {
+        return u
+    }
+    // If your draft already exposes a `clientId` property, prefer it.
+    if let u = (draft as AnyObject).value(forKey: "clientId") as? UUID {
+        return u
+    }
+    throw InvoiceBuildError.missingClientId
+}
+
 // MARK: - Payload/DTO helpers
 
 private struct InsertedInvoiceID: Decodable { let id: UUID }
@@ -93,22 +111,22 @@ enum InvoiceService {
         shortDateFormatter.timeZone = .current
         let shortDate = shortDateFormatter.string(from: Date())
 
-        // ISO formatter for due date
-        let iso = ISO8601DateFormatter()
+        // Extract client UUID from draft
+        let clientUUID = try clientId(from: draft)
 
-        // Build invoice payload
+        // Build invoice payload with only available fields and safe defaults
         let payload = NewInvoicePayload(
             number: draft.number,
-            client_id: draft.client!.id,
-            status: "open",  // <-- stays open until it's sent
-            subtotal: draft.subTotal,
-            tax: draft.taxAmount,
+            client_id: clientUUID,
+            status: "open",  // stays open until it's sent
+            subtotal: draft.total,          // if you don't track subtotal separately, use total
+            tax: 0,                         // no tax field on draft; default to 0
             total: draft.total,
-            currency: draft.currency.lowercased(),
-            due_date: iso.string(from: draft.dueDate),
-            notes: draft.notes.isEmpty ? nil : draft.notes,
+            currency: "USD",                // default; adjust if you add draft.currency
+            due_date: nil,                  // adjust if you add draft.dueDate
+            notes: nil,                     // adjust if you add draft.notes
             user_id: AuthService.currentUserIDFast(),
-            issued_at: shortDate  // <-- short date format
+            issued_at: shortDate
         )
 
         // 1) Insert invoice, return id

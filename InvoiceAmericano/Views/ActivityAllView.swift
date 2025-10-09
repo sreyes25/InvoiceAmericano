@@ -9,6 +9,7 @@ import Foundation
 import SwiftUI
 
 struct ActivityAllView: View {
+    @Binding var unreadCount: Int
     @State private var events: [ActivityEvent] = []
     @State private var loading = true
     @State private var error: String?
@@ -38,17 +39,22 @@ struct ActivityAllView: View {
             }
         }
         .navigationTitle("Activity")
-        .task { await load() }
+        .task { await loadAndMarkRead() }
     }
 
-    private func load() async {
+    private func loadAndMarkRead() async {
         loading = true; error = nil
         do {
-            // New service method that fetches all visible (RLS-scoped) events
             let evs = try await ActivityService.fetchAll(limit: 200)
-            await MainActor.run { events = evs; loading = false }
+            try await ActivityService.markAllAsRead()
+            let newCount = try await ActivityService.countUnread()
+            await MainActor.run {
+                self.events = evs
+                self.unreadCount = newCount
+                self.loading = false
+            }
         } catch {
-            await MainActor.run { self.error = error.localizedDescription; loading = false }
+            await MainActor.run { self.error = error.localizedDescription; self.loading = false }
         }
     }
 
@@ -88,3 +94,14 @@ struct ActivityAllView: View {
         return r.localizedString(for: date, relativeTo: Date())
     }
 }
+
+#if DEBUG
+struct ActivityAllView_Previews: PreviewProvider {
+    @State static var count = 3
+    static var previews: some View {
+        NavigationStack {
+            ActivityAllView(unreadCount: $count)
+        }
+    }
+}
+#endif

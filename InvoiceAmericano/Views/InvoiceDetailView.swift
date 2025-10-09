@@ -84,7 +84,7 @@ struct InvoiceDetailView: View {
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.large)
-
+                                let total = d.total ?? 0
                                 Button {
                                     Task { await send() }
                                 } label: {
@@ -93,6 +93,13 @@ struct InvoiceDetailView: View {
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.large)
+                                .disabled(total <= 0)
+
+                                if total <= 0 {
+                                    Text("Add items to enable sending.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.vertical, 8)

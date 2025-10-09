@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct MainTabView: View {
+    @State private var unreadCount = 0
     var body: some View {
         TabView {
             // HOME
@@ -30,15 +31,31 @@ struct MainTabView: View {
 
             // ACTIVITY
             NavigationStack {
-                ActivityAllView()      
+                ActivityAllView(unreadCount: $unreadCount)
             }
             .tabItem { Label("Activity", systemImage: "bell") }
+            .badge(unreadCount)
 
             // ACCOUNT
             NavigationStack {
                 AccountViewPlaceholder()
             }
             .tabItem { Label("Account", systemImage: "person.crop.circle") }
+        }
+        .task {
+            // Start realtime updates
+            await RealtimeService.start()
+
+            // Initial unread count
+            do {
+                unreadCount = try await ActivityService.countUnread()
+            } catch {
+                print("Failed to fetch unread count:", error)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .activityInserted)) { _ in
+            // When a new event arrives, bump badge count immediately
+            unreadCount += 1
         }
     }
 }
