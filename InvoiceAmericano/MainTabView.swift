@@ -18,7 +18,7 @@ struct MainTabView: View {
 
             // INVOICES
             NavigationStack {
-                InvoiceListView()  
+                InvoiceListView()
             }
             .tabItem { Label("Invoices", systemImage: "doc.plaintext") }
 
@@ -30,7 +30,7 @@ struct MainTabView: View {
 
             // ACTIVITY
             NavigationStack {
-                ActivityPlaceholder()
+                ActivityAllView()      
             }
             .tabItem { Label("Activity", systemImage: "bell") }
 
@@ -74,21 +74,6 @@ private struct ClientListPlaceholder: View {
     }
 }
 
-private struct ActivityPlaceholder: View {
-    var body: some View {
-        List {
-            ForEach(0..<6, id: \.self) { i in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Payment received").bold()
-                    Text("INV-000\(i) paid via Stripe").font(.caption).foregroundStyle(.secondary)
-                    Text(Date().addingTimeInterval(Double(-i) * 3600).formatted())
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-        }
-        .navigationTitle("Activity")
-    }
-}
 
 private struct AccountViewPlaceholder: View {
     var body: some View {
