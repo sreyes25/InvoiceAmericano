@@ -33,10 +33,12 @@ struct LineItemDraft: Identifiable, Hashable {
 }
 
 struct NewInvoiceView: View {
-    var onSubmit: (InvoiceDraft) -> Void  // we’ll save in the next step
-    
+    var preselectedClient: ClientRow? = nil
+    var lockClient: Bool = false
+    var onSaved: (InvoiceDraft) -> Void
+
     @Environment(\.dismiss) private var dismiss
-    @State private var draft = InvoiceDraft()
+    @State private var draft: InvoiceDraft
     @State private var clients: [ClientRow] = []
     @State private var isLoadingClients = true
     @State private var error: String?
@@ -47,6 +49,25 @@ struct NewInvoiceView: View {
         return draft.items.contains { !$0.description.trimmingCharacters(in: .whitespaces).isEmpty && $0.unitPrice >= 0 && $0.quantity > 0 }
     }
     
+    init(preselectedClient: ClientRow? = nil,
+         lockClient: Bool = false,
+         onSaved: @escaping (InvoiceDraft) -> Void) {
+        self.preselectedClient = preselectedClient
+        self.lockClient = lockClient
+        self.onSaved = onSaved
+
+        let initial = InvoiceDraft(
+            number: "",
+            client: preselectedClient, // auto-select client if provided
+            dueDate: Calendar.current.date(byAdding: .day, value: 14, to: Date())!,
+            currency: "USD",
+            taxPercent: 0,
+            notes: "",
+            items: []
+        )
+        _draft = State(initialValue: initial)
+    }
+
     var body: some View {
         Form {
             // Client & invoice basics
@@ -63,7 +84,7 @@ struct NewInvoiceView: View {
                         }
                     }
                 }
-                .disabled(isLoadingClients)
+                .disabled(lockClient || isLoadingClients)
                 
                 TextField("Invoice # (e.g. INV-0001)", text: $draft.number)
                     .textInputAutocapitalization(.characters)
@@ -143,7 +164,7 @@ struct NewInvoiceView: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") {
                     // Return the draft; actual DB save happens next step.
-                    onSubmit(draft)
+                    onSaved(draft)
                     dismiss()
                 }
                 .disabled(!canSave)
@@ -161,6 +182,9 @@ struct NewInvoiceView: View {
             await MainActor.run {
                 clients = rows
                 isLoadingClients = false
+                if lockClient, draft.client == nil, let c = preselectedClient {
+                    draft.client = c
+                }
             }
         } catch {
             await MainActor.run {

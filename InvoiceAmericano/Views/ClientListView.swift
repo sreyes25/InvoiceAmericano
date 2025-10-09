@@ -37,11 +37,19 @@ struct ClientListView: View {
                     } else {
                         ForEach(filtered) { c in
                             NavigationLink(value: c.id) {
-                                VStack(alignment: .leading) {
+                                VStack(alignment: .leading, spacing: 2) {
                                     Text(c.name).bold()
-                                    if let email = c.email, !email.isEmpty {
-                                        Text(email).font(.caption).foregroundStyle(.secondary)
+                                    HStack(spacing: 6) {
+                                        if let email = c.email, !email.isEmpty {
+                                            Text(email)
+                                        }
+                                        if (c.city?.isEmpty == false) || (c.state?.isEmpty == false) {
+                                            Text("·")
+                                            Text("\(c.city ?? "")\(c.city != nil && c.state != nil ? ", " : "")\(c.state ?? "")")
+                                        }
                                     }
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -59,7 +67,7 @@ struct ClientListView: View {
                 }
             }
             .navigationDestination(for: UUID.self) { id in
-                ClientDetailPlaceholder(clientId: id)    // swap later
+                ClientDetailView(clientId: id)
             }
             .sheet(isPresented: $showNew) {
                 NavigationStack {

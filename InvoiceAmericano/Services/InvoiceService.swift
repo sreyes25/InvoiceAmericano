@@ -205,6 +205,7 @@ enum InvoiceService {
                 line_items(id, description, qty, unit_price, amount)
             """)
             .eq("id", value: id.uuidString)
+            .limit(1)                  // <- extra safety with single()
             .single()
             .execute()
             .value

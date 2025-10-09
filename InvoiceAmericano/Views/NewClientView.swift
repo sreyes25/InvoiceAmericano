@@ -14,6 +14,10 @@ struct NewClientView: View {
     @State private var name = ""
     @State private var email = ""
     @State private var phone = ""
+    @State private var address = ""
+    @State private var city = ""
+    @State private var stateText = ""
+    @State private var zip = ""
     @State private var isSaving = false
     @State private var error: String?
 
@@ -23,6 +27,12 @@ struct NewClientView: View {
                 TextField("Name", text: $name)
                 TextField("Email", text: $email).keyboardType(.emailAddress)
                 TextField("Phone", text: $phone).keyboardType(.phonePad)
+            }
+            Section("Address") {
+                TextField("Street address", text: $address)
+                TextField("City", text: $city)
+                TextField("State", text: $stateText)
+                TextField("ZIP", text: $zip).keyboardType(.numbersAndPunctuation)
             }
             if let error {
                 Text(error).foregroundStyle(.red)
@@ -42,9 +52,15 @@ struct NewClientView: View {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         isSaving = true; error = nil
         do {
-            try await ClientService.createClient(name: name.trimmingCharacters(in: .whitespaces),
-                                                 email: email.isEmpty ? nil : email,
-                                                 phone: phone.isEmpty ? nil : phone)
+            try await ClientService.createClient(
+                name: name.trimmingCharacters(in: .whitespaces),
+                email: email.isEmpty ? nil : email,
+                phone: phone.isEmpty ? nil : phone,
+                address: address.isEmpty ? nil : address,
+                city: city.isEmpty ? nil : city,
+                state: stateText.isEmpty ? nil : stateText,
+                zip: zip.isEmpty ? nil : zip
+            )
             await MainActor.run {
                 isSaving = false
                 onSaved()
