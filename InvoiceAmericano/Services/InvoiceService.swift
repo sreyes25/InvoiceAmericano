@@ -8,24 +8,6 @@
 import Foundation
 import Supabase
 
-enum InvoiceBuildError: Error {
-    case missingClientId
-}
-
-// Attempts to extract a UUID from the draft.client (UUID string) or throws.
-private func clientId(from draft: InvoiceDraft) throws -> UUID {
-    // If your draft.client is a UUID string, parse it.
-    if let s = (draft as AnyObject).value(forKey: "client") as? String,
-       let u = UUID(uuidString: s) {
-        return u
-    }
-    // If your draft already exposes a `clientId` property, prefer it.
-    if let u = (draft as AnyObject).value(forKey: "clientId") as? UUID {
-        return u
-    }
-    throw InvoiceBuildError.missingClientId
-}
-
 // MARK: - Payload/DTO helpers
 
 private struct InsertedInvoiceID: Decodable { let id: UUID }
@@ -69,7 +51,7 @@ enum InvoiceService {
 
         let query = client
             .from("invoices")
-            .select("id, number, status, total, created_at, due_date, client:clients!invoices_client_id_fkey(name)")
+            .select("id, number, status, total, created_at, due_date, client_id, client:clients!invoices_client_id_fkey(name)")
             .order("created_at", ascending: false)
 
         let rows: [InvoiceRow] = try await query.execute().value
@@ -105,26 +87,29 @@ enum InvoiceService {
     static func createInvoice(from draft: InvoiceDraft) async throws -> (id: UUID, checkoutURL: URL?) {
         let client = SupabaseManager.shared.client
 
+        guard let clientId = draft.client?.id else {
+            throw NSError(domain: "InvoiceService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing client on draft"])
+        }
+
         // Formatter for short issue date (month/day/year)
         let shortDateFormatter = DateFormatter()
         shortDateFormatter.dateFormat = "yyyy-MM-dd"   // keep only date
         shortDateFormatter.timeZone = .current
         let shortDate = shortDateFormatter.string(from: Date())
 
-        // Extract client UUID from draft
-        let clientUUID = try clientId(from: draft)
+        let iso = ISO8601DateFormatter()
 
-        // Build invoice payload with only available fields and safe defaults
+        // Build invoice payload from draft (uses ClientRow.id and computed totals)
         let payload = NewInvoicePayload(
             number: draft.number,
-            client_id: clientUUID,
-            status: "open",  // stays open until it's sent
-            subtotal: draft.total,          // if you don't track subtotal separately, use total
-            tax: 0,                         // no tax field on draft; default to 0
+            client_id: clientId,
+            status: "open",                                  // stays open until it's sent
+            subtotal: draft.subTotal,
+            tax: draft.taxAmount,
             total: draft.total,
-            currency: "USD",                // default; adjust if you add draft.currency
-            due_date: nil,                  // adjust if you add draft.dueDate
-            notes: nil,                     // adjust if you add draft.notes
+            currency: draft.currency.lowercased(),
+            due_date: iso.string(from: draft.dueDate),
+            notes: draft.notes.isEmpty ? nil : draft.notes,
             user_id: AuthService.currentUserIDFast(),
             issued_at: shortDate
         )

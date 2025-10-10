@@ -25,94 +25,124 @@ struct InvoiceListView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    Picker("Status", selection: $status) {
-                        ForEach(InvoiceStatus.allCases, id: \.self) { s in
-                            Text(s == .all ? "All" : s.rawValue.capitalized).tag(s)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                }
-
-                Section("Invoices") {
-                    if isLoading && invoices.isEmpty {
-                        ProgressView("Loading…")
-                    } else if let error {
-                        Text(error).foregroundStyle(.red)
-                    } else if invoices.isEmpty {
-                        Text("No invoices").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(invoices, id: \.id) { inv in
-                            NavigationLink(value: inv.id) {
-                                InvoiceRowCell(inv: inv)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button {
-                                    isSendingId = inv.id
-                                    Task { await send(inv) }
-                                } label: {
-                                    Label("Send", systemImage: "paperplane")
-                                }
-                                .tint(.blue)
-                            }
-                        }
-                    }
-                }
+                statusPickerSection
+                invoicesSection
             }
             .navigationTitle("Invoices")
-            .toolbar {
-                Button {
-                    showNew = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-            }
+            .toolbar { addButton }
             .navigationDestination(for: UUID.self) { invoiceId in
                 InvoiceDetailView(invoiceId: invoiceId)
             }
-            .sheet(isPresented: $showNew) {
-                NavigationStack {
-                    NewInvoiceView { draft in
-                        Task {
-                            do {
-                                let _ = try await InvoiceService.createInvoice(from: draft)
-                                await load()        // refresh list after save
-                            } catch {
-                                await MainActor.run { self.error = error.localizedDescription }
-                            }
-                        }
-                    }
-                }
-            }
-            .sheet(item: $sharePayload) { payload in
-                ActivitySheet(items: payload.items) { completed, activityType in
-                    Task {
-                        guard completed, let id = isSendingId else {
-                            await MainActor.run { self.isSendingId = nil }
-                            return
-                        }
-                        let senders: Set<String> = [
-                            "com.apple.UIKit.activity.Message",
-                            "com.apple.UIKit.activity.Mail",
-                            "net.whatsapp.WhatsApp.ShareExtension"
-                        ]
-                        let raw = activityType?.rawValue ?? ""
-                        if senders.contains(raw) {
-                            try? await InvoiceService.markSent(id: id)
-                            await load()
-                        }
-                        await MainActor.run {
-                            self.isSendingId = nil
-                            self.sharePayload = nil
-                        }
-                    }
-                }
-            }
+            .sheet(isPresented: $showNew, content: {
+                newInvoiceSheet
+            })
+            .sheet(item: $sharePayload, content: { payload in
+                ActivitySheet(items: payload.items, onComplete: onShareCompleted)
+            })
             .task { await load() }
             .onChange(of: status) { _, _ in
                 Task { await load() }
             }
             .refreshable { await load() }
+        }
+    }
+
+    // MARK: - Sections
+
+    @ViewBuilder
+    private var statusPickerSection: some View {
+        Section {
+            Picker("Status", selection: $status) {
+                ForEach(InvoiceStatus.allCases, id: \.self) { s in
+                    Text(s == .all ? "All" : s.rawValue.capitalized).tag(s)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    @ViewBuilder
+    private var invoicesSection: some View {
+        Section("Invoices") {
+            if isLoading && invoices.isEmpty {
+                ProgressView("Loading…")
+            } else if let error {
+                Text(error).foregroundStyle(.red)
+            } else if invoices.isEmpty {
+                Text("No invoices").foregroundStyle(.secondary)
+            } else {
+                ForEach(invoices) { inv in
+                    NavigationLink(value: inv.id) {
+                        InvoiceRowCell(inv: inv)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button {
+                            isSendingId = inv.id
+                            Task { await send(inv) }
+                        } label: {
+                            Label("Send", systemImage: "paperplane")
+                        }
+                        .tint(.blue)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Toolbar
+
+    @ToolbarContentBuilder
+    private var addButton: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button { showNew = true } label: { Image(systemName: "plus") }
+        }
+    }
+
+    // MARK: - Sheets
+
+    @ViewBuilder
+    private var newInvoiceSheet: some View {
+        NavigationStack {
+            NewInvoiceView(onSaved: { draft in
+                Task { await createInvoice(from: draft) }
+            })
+        }
+    }
+
+    // MARK: - Actions
+
+    private func createInvoice(from draft: InvoiceDraft) async {
+        do {
+            _ = try await InvoiceService.createInvoice(from: draft)
+            await load()
+        } catch {
+            await MainActor.run { self.error = error.localizedDescription }
+        }
+    }
+
+    private func onShareCompleted(_ completed: Bool, _ activityType: UIActivity.ActivityType?) {
+        Task {
+            guard completed, let id = isSendingId else {
+                await MainActor.run {
+                    self.isSendingId = nil
+                    self.sharePayload = nil
+                }
+                return
+            }
+            let senders: Set<String> = [
+                "com.apple.UIKit.activity.Message",
+                "com.apple.UIKit.activity.Mail",
+                "net.whatsapp.WhatsApp.ShareExtension"
+            ]
+            let raw = activityType?.rawValue ?? ""
+            if senders.contains(raw) {
+                try? await InvoiceService.markSent(id: id)
+                await load()
+            }
+            await MainActor.run {
+                self.isSendingId = nil
+                self.sharePayload = nil
+            }
         }
     }
 

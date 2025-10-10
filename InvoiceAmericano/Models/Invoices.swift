@@ -7,10 +7,11 @@
 import Foundation
 
 // Shape returned by the select with an embedded client object.
-struct InvoiceRow: Decodable {
+struct InvoiceRow: Identifiable, Decodable {
     let id: UUID
     let number: String
     let status: String
+    let clientId: UUID?     // maps from DB "client_id"
     let total: Double?        // can be NULL while drafting
     let created_at: String?   // decode as String to avoid format issues
     let dueDate: String?      // maps from DB "due_date"
@@ -22,6 +23,7 @@ struct InvoiceRow: Decodable {
         case created_at
         case dueDate = "due_date"
         case sent_at
+        case clientId = "client_id"
     }
 }
 

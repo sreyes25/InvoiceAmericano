@@ -36,7 +36,7 @@ struct ClientListView: View {
                         Text("No clients").foregroundStyle(.secondary)
                     } else {
                         ForEach(filtered) { c in
-                            NavigationLink(value: c.id) {
+                            NavigationLink(value: c) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(c.name).bold()
                                     HStack(spacing: 6) {
@@ -66,8 +66,8 @@ struct ClientListView: View {
                     Image(systemName: "person.badge.plus")
                 }
             }
-            .navigationDestination(for: UUID.self) { id in
-                ClientDetailView(clientId: id)
+            .navigationDestination(for: ClientRow.self) { client in
+                ClientDetailView(client: client)
             }
             .sheet(isPresented: $showNew) {
                 NavigationStack {

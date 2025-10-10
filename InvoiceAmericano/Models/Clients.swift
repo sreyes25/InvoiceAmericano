@@ -18,3 +18,6 @@ struct ClientRow: Decodable, Identifiable, Hashable {
     let zip: String?
     let created_at: Date?
 }
+
+// For views that expect `Client`, map it to our existing ClientRow model.
+typealias Client = ClientRow
