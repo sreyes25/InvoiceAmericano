@@ -23,4 +23,8 @@ enum LocalNotify {
     }
 }
 
-//After apple dev account 
+//After apple dev account
+
+extension Notification.Name {
+    static let activityUnreadChanged = Notification.Name("activityUnreadChanged")
+}

@@ -10,7 +10,7 @@ import SwiftUI
 
 struct ActivityAllView: View {
     @Binding var unreadCount: Int
-    @State private var events: [ActivityEvent] = []
+    @State private var events: [ActivityRow] = []
     @State private var loading = true
     @State private var error: String?
 
@@ -24,16 +24,19 @@ struct ActivityAllView: View {
                     Text("No activity yet").foregroundStyle(.secondary)
                 }.padding(.top, 40)
             } else {
-                List(events) { ev in
-                    HStack(spacing: 12) {
-                        Image(systemName: icon(for: ev.event)).frame(width: 22)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(title(for: ev)).font(.subheadline).bold()
-                            Text(relTime(ev.created_at)).font(.caption).foregroundStyle(.secondary)
+                List {
+                    ForEach(events) { ev in
+                        HStack(spacing: 12) {
+                            Image(systemName: icon(for: ev.event)).frame(width: 22)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(title(for: ev)).font(.subheadline).bold()
+                                Text(relTime(ev.created_at)).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
                         }
-                        Spacer()
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
+                    .onDelete(perform: deleteRows)
                 }
                 .listStyle(.insetGrouped)
             }
@@ -45,16 +48,20 @@ struct ActivityAllView: View {
     private func loadAndMarkRead() async {
         loading = true; error = nil
         do {
-            let evs = try await ActivityService.fetchAll(limit: 200)
+            // First mark all as read on the server
             try await ActivityService.markAllAsRead()
-            let newCount = try await ActivityService.countUnread()
+            // Then fetch the latest list
+            let evs = try await ActivityService.fetchAll()
             await MainActor.run {
                 self.events = evs
-                self.unreadCount = newCount
+                self.unreadCount = 0   // we just marked them all as read
                 self.loading = false
             }
         } catch {
-            await MainActor.run { self.error = error.localizedDescription; self.loading = false }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.loading = false
+            }
         }
     }
 
@@ -72,7 +79,7 @@ struct ActivityAllView: View {
         }
     }
 
-    private func title(for ev: ActivityEvent) -> String {
+    private func title(for ev: ActivityRow) -> String {
         switch ev.event {
         case "created": return "Invoice created"
         case "opened": return "Invoice opened"
@@ -92,6 +99,17 @@ struct ActivityAllView: View {
         let r = RelativeDateTimeFormatter()
         r.unitsStyle = .short
         return r.localizedString(for: date, relativeTo: Date())
+    }
+    private func deleteRows(at offsets: IndexSet) {
+        let toDelete = offsets.map { events[$0] }
+        // Optimistic UI update
+        events.remove(atOffsets: offsets)
+        // Soft-delete on the server
+        Task {
+            for ev in toDelete {
+                try? await ActivityService.delete(id: ev.id)
+            }
+        }
     }
 }
 

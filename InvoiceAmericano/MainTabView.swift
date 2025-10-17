@@ -47,15 +47,16 @@ struct MainTabView: View {
             await RealtimeService.start()
 
             // Initial unread count
-            do {
-                unreadCount = try await ActivityService.countUnread()
-            } catch {
-                print("Failed to fetch unread count:", error)
-            }
+            unreadCount = 0
         }
         .onReceive(NotificationCenter.default.publisher(for: .activityInserted)) { _ in
             // When a new event arrives, bump badge count immediately
             unreadCount += 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("activityUnreadChanged"))) { note in
+            if let n = note.userInfo?["count"] as? Int {
+                unreadCount = n
+            }
         }
     }
 }
