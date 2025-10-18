@@ -2,60 +2,67 @@
 //  ActivityAllView.swift
 //  InvoiceAmericano
 //
-//  Created by Sergio Reyes on 10/9/25.
-//
 
-import Foundation
 import SwiftUI
 
 struct ActivityAllView: View {
-    @Binding var unreadCount: Int
-    @State private var events: [ActivityRow] = []
-    @State private var loading = true
+    @State private var items: [ActivityEvent] = []
+    @State private var loading = false
     @State private var error: String?
 
     var body: some View {
         Group {
-            if loading { ProgressView("Loading activity…") }
-            else if let e = error { Text(e).foregroundStyle(.red) }
-            else if events.isEmpty {
+            if loading && items.isEmpty {
+                ProgressView("Loading…")
+            } else if let e = error {
                 VStack(spacing: 8) {
-                    Image(systemName: "text.badge.plus").font(.largeTitle)
+                    Text("Error").font(.headline)
+                    Text(e).foregroundStyle(.red)
+                    Button("Retry") { Task { await load() } }
+                }
+            } else if items.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "bell.badge").font(.largeTitle)
                     Text("No activity yet").foregroundStyle(.secondary)
-                }.padding(.top, 40)
+                }
             } else {
                 List {
-                    ForEach(events) { ev in
-                        HStack(spacing: 12) {
-                            Image(systemName: icon(for: ev.event)).frame(width: 22)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(title(for: ev)).font(.subheadline).bold()
-                                Text(relTime(ev.created_at)).font(.caption).foregroundStyle(.secondary)
+                    ForEach(items) { row in
+                        NavigationLink(value: row.invoice_id) {
+                            HStack(spacing: 12) {
+                                Image(systemName: icon(for: row.event))
+                                    .frame(width: 22)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(title(for: row))
+                                        .font(.subheadline).bold()
+                                    Text(relativeTime(row.created_at))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
                             }
-                            Spacer()
+                            .padding(.vertical, 4)
                         }
-                        .padding(.vertical, 4)
                     }
-                    .onDelete(perform: deleteRows)
                 }
                 .listStyle(.insetGrouped)
             }
         }
         .navigationTitle("Activity")
-        .task { await loadAndMarkRead() }
+        .task { await load() }
     }
 
-    private func loadAndMarkRead() async {
+    // MARK: - Data
+
+    private func load() async {
         loading = true; error = nil
         do {
-            // First mark all as read on the server
-            try await ActivityService.markAllAsRead()
-            // Then fetch the latest list
-            let evs = try await ActivityService.fetchAll()
+            // Optional: mark-as-read when opening the tab view
+            try? await ActivityService.markAllAsRead()
+            let evs = try await ActivityService.fetchAll(limit: 200)
             await MainActor.run {
-                self.events = evs
-                self.unreadCount = 0   // we just marked them all as read
-                self.loading = false
+                items = evs
+                loading = false
             }
         } catch {
             await MainActor.run {
@@ -66,60 +73,39 @@ struct ActivityAllView: View {
     }
 
     // MARK: - Helpers
+
+    private func title(for row: ActivityEvent) -> String {
+        // Simple readable title like: "Invoice – paid"
+        "\(displayName(for: row)) – \(row.event.capitalized)"
+    }
+
+    private func displayName(for _: ActivityEvent) -> String {
+        // If you later join invoice number/title, swap this out.
+        "Invoice"
+    }
+
     private func icon(for event: String) -> String {
         switch event {
-        case "created": return "doc.badge.plus"
-        case "opened": return "eye"
-        case "sent": return "paperplane"
-        case "paid": return "checkmark.seal"
+        case "created":  return "doc.badge.plus"
+        case "opened":   return "eye"
+        case "sent":     return "paperplane"
+        case "paid":     return "checkmark.seal"
         case "archived": return "archivebox"
-        case "deleted": return "trash"
-        case "status_changed": return "arrow.triangle.2.circlepath"
-        default: return "clock"
+        case "deleted":  return "trash"
+        default:         return "clock"
         }
     }
 
-    private func title(for ev: ActivityRow) -> String {
-        switch ev.event {
-        case "created": return "Invoice created"
-        case "opened": return "Invoice opened"
-        case "sent": return "Invoice sent"
-        case "paid": return "Invoice paid"
-        case "archived": return "Invoice archived"
-        case "deleted": return "Invoice deleted"
-        case "status_changed": return "Status changed"
-        default: return ev.event.capitalized
-        }
-    }
-
-    private func relTime(_ s: String) -> String {
+    private func relativeTime(_ iso: String) -> String {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = f.date(from: s) ?? ISO8601DateFormatter().date(from: s) ?? Date()
+        var date = f.date(from: iso)
+        if date == nil {
+            f.formatOptions = [.withInternetDateTime]
+            date = f.date(from: iso)
+        }
         let r = RelativeDateTimeFormatter()
         r.unitsStyle = .short
-        return r.localizedString(for: date, relativeTo: Date())
-    }
-    private func deleteRows(at offsets: IndexSet) {
-        let toDelete = offsets.map { events[$0] }
-        // Optimistic UI update
-        events.remove(atOffsets: offsets)
-        // Soft-delete on the server
-        Task {
-            for ev in toDelete {
-                try? await ActivityService.delete(id: ev.id)
-            }
-        }
+        return r.localizedString(for: date ?? Date(), relativeTo: Date())
     }
 }
-
-#if DEBUG
-struct ActivityAllView_Previews: PreviewProvider {
-    @State static var count = 3
-    static var previews: some View {
-        NavigationStack {
-            ActivityAllView(unreadCount: $count)
-        }
-    }
-}
-#endif

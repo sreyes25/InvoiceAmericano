@@ -9,60 +9,68 @@ import Foundation
 import Supabase
 import PostgREST
 
-public struct ActivityRow: Decodable, Identifiable {
-    public let id: UUID
-    public let invoice_id: UUID
-    public let event: String
-    public let created_at: String
-    public let read_at: String?
-    public let deleted_at: String?
+private struct ActivityInsert: Encodable {
+    let invoice_id: UUID
+    let event: String
+    let metadata: [String: String]?
 }
 
 enum ActivityService {
-    
+    /// All activity (most recent first)
+    static func fetchAll(limit: Int = 200) async throws -> [ActivityEvent] {
+        try await SB.shared.client
+            .from("invoice_activity")
+            .select()
+            .order("created_at", ascending: false)
+            .limit(limit)
+            .execute()
+            .value
+    }
+
+    /// Activity for a single invoice (most recent first)
     static func fetch(invoiceId: UUID, limit: Int = 200) async throws -> [ActivityEvent] {
-        let resp = try await SB.shared.client
+        try await SB.shared.client
             .from("invoice_activity")
             .select()
             .eq("invoice_id", value: invoiceId.uuidString)
             .order("created_at", ascending: false)
             .limit(limit)
             .execute()
-
-        return try JSONDecoder().decode([ActivityEvent].self, from: resp.data)
-    }
-    
-    // 1) List (exclude soft-deleted)
-    static func fetchAll() async throws -> [ActivityRow] {
-        let client = SupabaseManager.shared.client
-        return try await client
-            .from("invoice_activity")
-            .select("id, invoice_id, event, created_at, read_at, deleted_at")
-            .is("deleted_at", value: nil)               // deleted_at IS NULL
-            .order("created_at", ascending: false)
-            .execute()
             .value
     }
 
-    // 2) Mark all read (only unread & not deleted)
-    static func markAllAsRead() async throws {
-        let client = SupabaseManager.shared.client
-        let now = ISO8601DateFormatter().string(from: Date())
-        _ = try await client
+    /// Log a new event (optional metadata)
+    static func log(invoiceId: UUID, event: String, metadata: [String: String]? = nil) async throws {
+        let payload = ActivityInsert(invoice_id: invoiceId, event: event, metadata: metadata)
+        _ = try await SB.shared.client
             .from("invoice_activity")
-            .update(["read_at": now])
-            .is("read_at", value: nil)                  // read_at IS NULL
-            .is("deleted_at", value: nil)               // deleted_at IS NULL
+            .insert(payload)
             .execute()
     }
 
-    // 3) Soft delete one row
-    static func delete(id: UUID) async throws {
-        let client = SupabaseManager.shared.client
-        let now = ISO8601DateFormatter().string(from: Date())
-        _ = try await client
+    static func countUnread() async throws -> Int {
+        let resp = try await SB.shared.client
             .from("invoice_activity")
-            .update(["deleted_at": now])
+            .select("id", head: false, count: .exact)
+            .is("read_at", value: nil) 
+            .execute()
+        return resp.count ?? 0
+    }
+
+    static func markAllAsRead() async throws {
+        let nowISO = ISO8601DateFormatter().string(from: Date())
+        _ = try await SB.shared.client
+            .from("invoice_activity")
+            .update(["read_at": nowISO])
+            .is("read_at", value: nil)  
+            .execute()
+    }
+
+    /// Delete a single activity row
+    static func delete(id: UUID) async throws {
+        _ = try await SB.shared.client
+            .from("invoice_activity")
+            .delete()
             .eq("id", value: id.uuidString)
             .execute()
     }
