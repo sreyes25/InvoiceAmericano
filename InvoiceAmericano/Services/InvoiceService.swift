@@ -45,6 +45,33 @@ private struct _SentUpdate: Encodable { let status: String; let sent_at: String 
 
 enum InvoiceService {
 
+    // Generate next invoice number like A1, A2, ... by scanning recent invoices
+    static func nextInvoiceNumber() async throws -> String {
+        let client = SupabaseManager.shared.client
+
+        // Pull recent numbers and find the max numeric suffix
+        let resp = try await client
+            .from("invoices")
+            .select("number, created_at")
+            .order("created_at", ascending: false)
+            .limit(50)
+            .execute()
+
+        struct Row: Decodable { let number: String? }
+        let rows = try JSONDecoder().decode([Row].self, from: resp.data)
+
+        // Parse formats like "A123" (or just "123"). We keep the alpha prefix if present.
+        var maxNum = 0
+        for r in rows {
+            guard let raw = r.number?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { continue }
+            // Extract trailing digits
+            let digits = raw.reversed().prefix { $0.isNumber }.reversed()
+            if let n = Int(String(digits)) { maxNum = max(maxNum, n) }
+        }
+        let next = maxNum + 1
+        return "A\(next)"
+    }
+
     // List screen data
     static func fetchInvoices(status: InvoiceStatus) async throws -> [InvoiceRow] {
         let client = SupabaseManager.shared.client
@@ -91,24 +118,34 @@ enum InvoiceService {
             throw NSError(domain: "InvoiceService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing client on draft"])
         }
 
+        // Ensure invoice number exists; auto-generate if user left it blank
+        let trimmedNumber = draft.number.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalNumber: String
+        if trimmedNumber.isEmpty {
+            finalNumber = try await nextInvoiceNumber()
+        } else {
+            finalNumber = trimmedNumber
+        }
+
         // Formatter for short issue date (month/day/year)
         let shortDateFormatter = DateFormatter()
         shortDateFormatter.dateFormat = "yyyy-MM-dd"   // keep only date
         shortDateFormatter.timeZone = .current
         let shortDate = shortDateFormatter.string(from: Date())
+        let shortDueDate = shortDateFormatter.string(from: draft.dueDate)
 
         let iso = ISO8601DateFormatter()
 
         // Build invoice payload from draft (uses ClientRow.id and computed totals)
         let payload = NewInvoicePayload(
-            number: draft.number,
+            number: finalNumber,
             client_id: clientId,
             status: "open",                                  // stays open until it's sent
             subtotal: draft.subTotal,
             tax: draft.taxAmount,
             total: draft.total,
             currency: draft.currency.lowercased(),
-            due_date: iso.string(from: draft.dueDate),
+            due_date: shortDueDate,
             notes: draft.notes.isEmpty ? nil : draft.notes,
             user_id: AuthService.currentUserIDFast(),
             issued_at: shortDate

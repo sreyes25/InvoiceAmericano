@@ -44,8 +44,7 @@ struct NewInvoiceView: View {
 
     // Prevents saving 0-dollar invoices
     private var canSave: Bool {
-        guard draft.client != nil,
-              !draft.number.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty else { return false }
+        guard draft.client != nil else { return false }
         return draft.total > 0 && draft.items.contains {
             !$0.description.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty &&
             $0.unitPrice > 0 &&
@@ -174,6 +173,14 @@ struct NewInvoiceView: View {
             }
         }
         .task { await loadClients() }
+        .task {
+            // Prefill an invoice number for a friendly, editable default
+            if draft.number.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if let next = try? await InvoiceService.nextInvoiceNumber() {
+                    await MainActor.run { draft.number = next }
+                }
+            }
+        }
     }
 
     // --- Load clients from DB ---

@@ -14,7 +14,17 @@ struct ActivityEvent: Identifiable, Decodable {
     let metadata: [String: AnyDecodable]?
     let actor_user: UUID?
     let created_at: String
+    let inv: JoinedInv?
 }
 
 // Helper for decoding JSONB loosely
 struct AnyDecodable: Decodable {}
+
+struct JoinedInv: Decodable {
+    let number: String?
+    let client: JoinedClient?
+}
+
+struct JoinedClient: Decodable {
+    let name: String?
+}

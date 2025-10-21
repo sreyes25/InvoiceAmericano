@@ -16,23 +16,79 @@ private struct ActivityInsert: Encodable {
 }
 
 enum ActivityService {
+    // Paged fetch for Activity tab
+
+    static func fetchPage(offset: Int = 0, limit: Int = 50) async throws -> [ActivityEvent] {
+         let to = offset + limit - 1
+         let response = try await SB.shared.client
+             .from("invoice_activity")
+             .select()
+             .is("deleted_at", value: nil)
+             .order("created_at", ascending: false)
+             .range(from: offset, to: to)
+             .execute()
+         return try JSONDecoder().decode([ActivityEvent].self, from: response.data)
+     }
+    
+    static func fetchPageJoined(offset: Int, limit: Int) async throws -> [ActivityJoined] {
+        let to = offset + limit - 1
+
+        // Replace both constraint names below with your actual Supabase FK constraint names.
+        let select =
+        """
+        id, invoice_id, event, created_at,
+        invoice:invoices!invoice_activity_invoice_id_fkey(
+            number,
+            client:clients!invoices_client_id_fkey(name)
+        )
+        """
+
+        let resp = try await SB.shared.client
+            .from("invoice_activity")
+            .select(select)
+            .order("created_at", ascending: false)
+            .range(from: offset, to: to)
+            .execute()
+
+        return try JSONDecoder().decode([ActivityJoined].self, from: resp.data)
+    }
+    
     /// All activity (most recent first)
     static func fetchAll(limit: Int = 200) async throws -> [ActivityEvent] {
-        try await SB.shared.client
+        let resp = try await SB.shared.client
             .from("invoice_activity")
-            .select()
+            .select("""
+                id,
+                invoice_id,
+                event,
+                metadata,
+                actor_user,
+                created_at,
+                inv:invoices!invoice_activity_invoice_id_fkey(number, client:clients(name))
+            """)
             .order("created_at", ascending: false)
             .limit(limit)
             .execute()
-            .value
+
+        let rows = try JSONDecoder().decode([ActivityEvent].self, from: resp.data)
+        return rows
     }
 
     /// Activity for a single invoice (most recent first)
     static func fetch(invoiceId: UUID, limit: Int = 200) async throws -> [ActivityEvent] {
         try await SB.shared.client
             .from("invoice_activity")
-            .select()
+            .select("""
+                id,
+                invoice_id,
+                event,
+                metadata,
+                actor_user,
+                created_at,
+                inv:invoices!invoice_activity_invoice_id_fkey(number, client:clients(name))
+            """)
             .eq("invoice_id", value: invoiceId.uuidString)
+            .is("deleted_at", value: nil)
             .order("created_at", ascending: false)
             .limit(limit)
             .execute()
@@ -52,7 +108,8 @@ enum ActivityService {
         let resp = try await SB.shared.client
             .from("invoice_activity")
             .select("id", head: false, count: .exact)
-            .is("read_at", value: nil) 
+            .is("read_at", value: nil)
+            .is("deleted_at", value: nil)
             .execute()
         return resp.count ?? 0
     }
@@ -62,16 +119,19 @@ enum ActivityService {
         _ = try await SB.shared.client
             .from("invoice_activity")
             .update(["read_at": nowISO])
-            .is("read_at", value: nil)  
+            .is("read_at", value: nil)
+            .is("deleted_at", value: nil)
             .execute()
     }
 
-    /// Delete a single activity row
-    static func delete(id: UUID) async throws {
-        _ = try await SB.shared.client
-            .from("invoice_activity")
-            .delete()
-            .eq("id", value: id.uuidString)
-            .execute()
-    }
+    // MARK: - Soft Delete (update deleted_at)
+       static func delete(id: UUID) async throws {
+           let nowISO = ISO8601DateFormatter().string(from: Date())
+           _ = try await SB.shared.client
+               .from("invoice_activity")
+               .update(["deleted_at": nowISO])
+               .eq("id", value: id.uuidString)
+               .execute()
+       }
+
 }

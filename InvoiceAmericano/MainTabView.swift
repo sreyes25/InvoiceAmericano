@@ -15,7 +15,7 @@ struct MainTabView: View {
     private var badgeText: String? {
         unreadCount == 0 ? nil : String(unreadCount)
     }
-
+    
     var body: some View {
         TabView(selection: $selectedTab) {
             // HOME
@@ -42,6 +42,9 @@ struct MainTabView: View {
             // ACTIVITY
             NavigationStack {
                 ActivityAllView()
+                    .navigationDestination(for: UUID.self) { invoiceId in
+                        InvoiceDetailView(invoiceId: invoiceId)
+                    }
             }
             .tabItem { Label("Activity", systemImage: "bell") }
             .tag(3)
@@ -84,8 +87,15 @@ struct MainTabView: View {
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .activityUnreadChanged)) { note in
+            if let n = note.userInfo?["count"] as? Int {
+                unreadCount = n
+            }
+        }
+
     }
 }
+
 
 
 
