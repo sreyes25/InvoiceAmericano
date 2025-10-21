@@ -42,6 +42,9 @@ struct NewInvoiceView: View {
     @State private var isLoadingClients = true
     @State private var error: String?
 
+    // Track if user manually changed due date, so defaults don't overwrite it later
+    @State private var didUserChangeDueDate = false
+
     // Prevents saving 0-dollar invoices
     private var canSave: Bool {
         guard draft.client != nil else { return false }
@@ -93,6 +96,9 @@ struct NewInvoiceView: View {
                     .textInputAutocapitalization(.characters)
 
                 DatePicker("Due date", selection: $draft.dueDate, displayedComponents: .date)
+                    .onChange(of: draft.dueDate) { _, _ in
+                        didUserChangeDueDate = true
+                    }
 
                 HStack {
                     Text("Currency")
@@ -172,9 +178,28 @@ struct NewInvoiceView: View {
                 .disabled(!canSave)
             }
         }
+        // Load clients
         .task { await loadClients() }
+        // Prefill from user defaults (terms not shown here; we map tax/dueDays/footerNotes)
         .task {
-            // Prefill an invoice number for a friendly, editable default
+            if let d = try? await InvoiceDefaultsService.loadDefaults() {
+                await MainActor.run {
+                    // Only apply if user hasn’t already changed them
+                    if draft.taxPercent == 0 { draft.taxPercent = d.taxRate }
+                    if draft.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       let footer = d.footerNotes, !footer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        draft.notes = footer
+                    }
+                    if !didUserChangeDueDate {
+                        if let newDue = Calendar.current.date(byAdding: .day, value: d.dueDays, to: Date()) {
+                            draft.dueDate = newDue
+                        }
+                    }
+                }
+            }
+        }
+        // Prefill a friendly invoice number (editable)
+        .task {
             if draft.number.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 if let next = try? await InvoiceService.nextInvoiceNumber() {
                     await MainActor.run { draft.number = next }

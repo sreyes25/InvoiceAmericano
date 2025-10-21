@@ -52,7 +52,7 @@ struct MainTabView: View {
             
             // ACCOUNT
             NavigationStack {
-                AccountViewPlaceholder()
+                AccountView()
             }
             .tabItem { Label("Account", systemImage: "person.crop.circle") }
             .tag(4)

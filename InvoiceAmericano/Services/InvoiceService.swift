@@ -44,6 +44,39 @@ private struct _SentUpdate: Encodable { let status: String; let sent_at: String 
 // MARK: - Service
 
 enum InvoiceService {
+    
+    // Lightweight stats for the Account tab
+    struct AccountStats {
+        let totalCount: Int
+        let paidCount: Int
+        let outstandingAmount: Double   // sum of totals for open/sent/overdue
+    }
+
+    static func fetchAccountStats() async throws -> AccountStats {
+        let client = SupabaseManager.shared.client
+
+        // Keep it simple and reliable: fetch status + total and compute in-app.
+        // (We can replace with SQL aggregates later if needed.)
+        struct Row: Decodable { let status: String; let total: Double? }
+
+        let rows: [Row] = try await client
+            .from("invoices")
+            .select("status,total")
+            .execute()
+            .value
+
+        let totalCount = rows.count
+        let paidCount = rows.filter { $0.status.lowercased() == "paid" }.count
+        let outstandingAmount = rows
+            .filter { ["open","sent","overdue"].contains($0.status.lowercased()) }
+            .reduce(0.0) { $0 + ($1.total ?? 0.0) }
+
+        return AccountStats(
+            totalCount: totalCount,
+            paidCount: paidCount,
+            outstandingAmount: outstandingAmount
+        )
+    }
 
     // Generate next invoice number like A1, A2, ... by scanning recent invoices
     static func nextInvoiceNumber() async throws -> String {
@@ -118,7 +151,10 @@ enum InvoiceService {
             throw NSError(domain: "InvoiceService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing client on draft"])
         }
 
-        // Ensure invoice number exists; auto-generate if user left it blank
+        // ---- 1) Load user defaults once (terms/taxRate/dueDays/footerNotes) ----
+        let defaults = try? await InvoiceDefaultsService.loadDefaults()
+
+        // ---- 2) Ensure invoice number exists; auto-generate if user left it blank ----
         let trimmedNumber = draft.number.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalNumber: String
         if trimmedNumber.isEmpty {
@@ -127,31 +163,56 @@ enum InvoiceService {
             finalNumber = trimmedNumber
         }
 
-        // Formatter for short issue date (month/day/year)
-        let shortDateFormatter = DateFormatter()
-        shortDateFormatter.dateFormat = "yyyy-MM-dd"   // keep only date
-        shortDateFormatter.timeZone = .current
-        let shortDate = shortDateFormatter.string(from: Date())
-        let shortDueDate = shortDateFormatter.string(from: draft.dueDate)
+        // ---- 3) Compute issued_at and due_date (string) ----
+        // Always stamp today's issued date once here (UI can also show it)
+        let ymd = DateFormatter()
+        ymd.dateFormat = "yyyy-MM-dd"
+        ymd.timeZone = .current
 
-        _ = ISO8601DateFormatter()
+        let issuedAtDate = Date()
+        let issuedAtStr = ymd.string(from: issuedAtDate)
 
-        // Build invoice payload from draft (uses ClientRow.id and computed totals)
+        // The draft currently provides a concrete dueDate; if you later make it optional,
+        // you can fallback to defaults?.dueDays here.
+        let dueDateStr = ymd.string(from: draft.dueDate)
+
+        // ---- 4) Merge defaults for notes and tax if missing/zero ----
+        // Notes: if draft.notes is blank, use default footer notes (if present)
+        let trimmedNotes = draft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveNotes: String? = {
+            if !trimmedNotes.isEmpty { return trimmedNotes }
+            if let def = defaults?.footerNotes, !def.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return def
+            }
+            return nil
+        }()
+
+        // Tax/Total: if draft has 0 tax but defaults has a taxRate, recompute
+        let effectiveSubtotal = draft.subTotal
+        var effectiveTax = draft.taxAmount
+        var effectiveTotal = draft.total
+
+        if effectiveTax == 0, let rate = defaults?.taxRate, rate > 0 {
+            effectiveTax = (effectiveSubtotal * rate) / 100.0
+            effectiveTotal = effectiveSubtotal + effectiveTax
+        }
+
+        // ---- 5) Build invoice payload from draft + merged defaults ----
         let payload = NewInvoicePayload(
             number: finalNumber,
             client_id: clientId,
             status: "open",                                  // stays open until it's sent
-            subtotal: draft.subTotal,
-            tax: draft.taxAmount,
-            total: draft.total,
+            subtotal: effectiveSubtotal,
+            tax: effectiveTax,
+            total: effectiveTotal,
             currency: draft.currency.lowercased(),
-            due_date: shortDueDate,
-            notes: draft.notes.isEmpty ? nil : draft.notes,
+            due_date: dueDateStr,
+            notes: effectiveNotes,
             user_id: AuthService.currentUserIDFast(),
-            issued_at: shortDate
+            issued_at: issuedAtStr
         )
 
-        // 1) Insert invoice, return id
+        // ---- 6) Insert invoice, return id ----
         let created: InsertedInvoiceID = try await client
             .from("invoices")
             .insert(payload)
@@ -161,7 +222,7 @@ enum InvoiceService {
             .value
         let invoiceId = created.id
 
-        // 2) Insert line items
+        // ---- 7) Insert line items ----
         let itemsPayload = draft.items.map {
             NewLineItemPayload(
                 invoice_id: invoiceId,
@@ -173,7 +234,7 @@ enum InvoiceService {
         }
         _ = try await client.from("line_items").insert(itemsPayload).execute()
 
-        // 3) Optionally create checkout (we ignore the return body for SDK compatibility)
+        // ---- 8) Optionally create checkout (ignore response body if function not deployed) ----
         let checkoutURL: URL? = nil
         do {
             _ = try await client.functions.invoke(
@@ -217,8 +278,6 @@ enum InvoiceService {
         } catch {
             // It's okay if it's not there yet
         }
-
-        
 
         return checkoutURL
     }
