@@ -22,6 +22,10 @@ struct EditClientView: View {
     @State private var zip: String
     @State private var isSaving = false
     @State private var error: String?
+    @FocusState private var focused: Field?
+    private enum Field: Hashable {
+        case name, email, phone, address, city, state, zip
+    }
 
     init(client: ClientRow, onSaved: @escaping (ClientRow) -> Void) {
         self.client = client
@@ -40,17 +44,53 @@ struct EditClientView: View {
             Form {
                 Section("Name") {
                     TextField("Full name", text: $name)
+                        .textContentType(.name)
+                        .submitLabel(.next)
+                        .focused($focused, equals: .name)
+                        .onSubmit { focused = .email }
                 }
                 Section("Contact") {
-                    TextField("Email", text: $email).keyboardType(.emailAddress)
-                    TextField("Phone", text: $phone).keyboardType(.phonePad)
+                    TextField("Email", text: $email)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .textContentType(.emailAddress)
+                        .submitLabel(.next)
+                        .focused($focused, equals: .email)
+                        .onSubmit { focused = .phone }
+
+                    TextField("Phone", text: $phone)
+                        .keyboardType(.phonePad)
+                        .textContentType(.telephoneNumber)
+                        .submitLabel(.next)
+                        .focused($focused, equals: .phone)
+                        .onSubmit { focused = .address }
                 }
                 Section("Address") {
                     TextField("Street", text: $address)
+                        .textContentType(.fullStreetAddress)
+                        .submitLabel(.next)
+                        .focused($focused, equals: .address)
+                        .onSubmit { focused = .city }
                     HStack {
                         TextField("City", text: $city)
-                        TextField("State", text: $state).frame(width: 80)
-                        TextField("ZIP", text: $zip).frame(width: 100)
+                            .textContentType(.addressCity)
+                            .submitLabel(.next)
+                            .focused($focused, equals: .city)
+                            .onSubmit { focused = .state }
+                        TextField("State", text: $state)
+                            .frame(width: 80)
+                            .textInputAutocapitalization(.characters)
+                            .textContentType(.addressState)
+                            .submitLabel(.next)
+                            .focused($focused, equals: .state)
+                            .onSubmit { focused = .zip }
+                        TextField("ZIP", text: $zip)
+                            .frame(width: 100)
+                            .keyboardType(.numbersAndPunctuation)
+                            .textContentType(.postalCode)
+                            .submitLabel(.done)
+                            .focused($focused, equals: .zip)
+                            .onSubmit { focused = nil }
                     }
                 }
                 if let error {
@@ -69,33 +109,53 @@ struct EditClientView: View {
                     .disabled(isSaving || name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
         }
     }
 
     private func save() async {
         isSaving = true; error = nil
+
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let trimmedPhone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedCity = city.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedState = state.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let trimmedZip = zip.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // very light email sanity check (optional)
+        if !trimmedEmail.isEmpty, !trimmedEmail.contains("@") || !trimmedEmail.contains(".") {
+            await MainActor.run {
+                self.error = "Please enter a valid email."
+                self.isSaving = false
+                self.focused = .email
+            }
+            return
+        }
+
         do {
             try await ClientService.updateClient(
                 id: client.id,
-                name: name.trimmingCharacters(in: .whitespaces),
-                email: email.isEmpty ? nil : email,
-                phone: phone.isEmpty ? nil : phone,
-                address: address.isEmpty ? nil : address,
-                city: city.isEmpty ? nil : city,
-                state: state.isEmpty ? nil : state,
-                zip: zip.isEmpty ? nil : zip
+                name: trimmedName,
+                email: trimmedEmail.isEmpty ? nil : trimmedEmail,
+                phone: trimmedPhone.isEmpty ? nil : trimmedPhone,
+                address: trimmedAddress.isEmpty ? nil : trimmedAddress,
+                city: trimmedCity.isEmpty ? nil : trimmedCity,
+                state: trimmedState.isEmpty ? nil : trimmedState,
+                zip: trimmedZip.isEmpty ? nil : trimmedZip
             )
 
             // Rebuild a local ClientRow to hand back (keeps UI snappy)
             let updated = ClientRow(
                 id: client.id,
-                name: name.trimmingCharacters(in: .whitespaces),
-                email: email.isEmpty ? nil : email,
-                phone: phone.isEmpty ? nil : phone,
-                address: address.isEmpty ? nil : address,
-                city: city.isEmpty ? nil : city,
-                state: state.isEmpty ? nil : state,
-                zip: zip.isEmpty ? nil : zip,
+                name: trimmedName,
+                email: trimmedEmail.isEmpty ? nil : trimmedEmail,
+                phone: trimmedPhone.isEmpty ? nil : trimmedPhone,
+                address: trimmedAddress.isEmpty ? nil : trimmedAddress,
+                city: trimmedCity.isEmpty ? nil : trimmedCity,
+                state: trimmedState.isEmpty ? nil : trimmedState,
+                zip: trimmedZip.isEmpty ? nil : trimmedZip,
                 created_at: client.created_at
             )
 

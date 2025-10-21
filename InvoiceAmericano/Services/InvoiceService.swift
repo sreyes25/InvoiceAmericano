@@ -134,7 +134,7 @@ enum InvoiceService {
         let shortDate = shortDateFormatter.string(from: Date())
         let shortDueDate = shortDateFormatter.string(from: draft.dueDate)
 
-        let iso = ISO8601DateFormatter()
+        _ = ISO8601DateFormatter()
 
         // Build invoice payload from draft (uses ClientRow.id and computed totals)
         let payload = NewInvoicePayload(
