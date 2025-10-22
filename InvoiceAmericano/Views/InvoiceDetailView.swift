@@ -218,7 +218,7 @@ struct InvoiceDetailView: View {
     private func openPDFPreview() async {
         guard let d = detail else { return }
         do {
-            let url = try PDFGenerator.makeInvoicePDF(detail: d)
+            let url = try await PDFGenerator.makeInvoicePDF(detail: d)
             await MainActor.run { self.previewItem = PDFPreviewItem(url: url) }
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
@@ -235,7 +235,7 @@ struct InvoiceDetailView: View {
 
             // 2) Fresh PDF
             guard let d = detail else { return }
-            let pdfURL = try PDFGenerator.makeInvoicePDF(detail: d)
+            let pdfURL = try await PDFGenerator.makeInvoicePDF(detail: d)
 
             // 3) Verify the PDF really exists and has size > 0 (prevents blank sheet)
             let path = pdfURL.path

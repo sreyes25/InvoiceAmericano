@@ -127,31 +127,40 @@ struct BrandingView: View {
     private func save() async {
         isSaving = true
         defer { isSaving = false }
+        var step = "start"
 
         do {
             var logoPublicURL: String? = nil
 
             // If user picked a new image, upload it
             if let ui = pickedUIImage {
+                step = "uploadLogo"
+                print("[Branding] step=\(step) – preparing image upload")
                 let resized = ui.ia_resized(maxDimension: 512)
                 guard let data = resized.pngData() else { throw SaveError.couldNotEncodePNG }
                 logoPublicURL = try await SupabaseStorageService.uploadBrandingLogo(data: data)
+                print("[Branding] step=\(step) – storage OK, url=", logoPublicURL ?? "nil")
             } else if let url = existingLogoURL {
                 logoPublicURL = url.absoluteString
+                print("[Branding] step=reuseLogo – reusing existing url=", logoPublicURL ?? "nil")
             }
 
             let accentHex = accentColor.ia_hexString()
 
+            step = "upsertSettings"
+            print("[Branding] step=\(step) – name=\(businessName), hasLogo=\(logoPublicURL != nil), accent=\(accentHex)")
             try await BrandingService.upsertBranding(
                 businessName: businessName,
                 tagline: tagline,
                 accentHex: accentHex,
                 logoPublicURL: logoPublicURL
             )
-
+            print("[Branding] step=done – settings upsert OK")
             await MainActor.run { dismiss() }
         } catch {
-            await MainActor.run { errorText = "Save failed. \(error.localizedDescription)" }
+            let message = "Save failed at \(step). \(error.localizedDescription)"
+            print("[Branding] ERROR –", message)
+            await MainActor.run { errorText = message }
         }
     }
 

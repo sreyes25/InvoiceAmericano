@@ -197,6 +197,9 @@ struct AccountView: View {
                 Spacer()
                 Toggle("", isOn: $notificationsEnabled)
                     .labelsHidden()
+                    .onChange(of: notificationsEnabled) {
+                        Task { await ProfileService.updateNotifications(enabled: notificationsEnabled) }
+                    }
             }
             .padding(12)
             .background(

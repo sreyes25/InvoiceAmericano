@@ -182,7 +182,7 @@ struct InvoiceListView: View {
 
             // 2) Build the PDF (this is synchronous & writes a real file)
             let detail = try await InvoiceService.fetchInvoiceDetail(id: inv.id)
-            let pdfURL = try PDFGenerator.makeInvoicePDF(detail: detail)
+            let pdfURL = try await PDFGenerator.makeInvoicePDF(detail: detail)
 
             // 3) Verify the PDF actually exists and is non-zero size (prevents blank sheet)
             let path = pdfURL.path
