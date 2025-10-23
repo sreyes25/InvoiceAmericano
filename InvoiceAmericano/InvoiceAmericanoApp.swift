@@ -15,9 +15,10 @@ struct InvoiceAmericanoApp: App {
 
     var body: some Scene {
         WindowGroup {
+            
             let root = Group {
                 if isAuthed {
-                    MainTabView()  // your main app UI
+                    MainTabView()  // main app UI
                 } else {
                     AuthView()
                 }
