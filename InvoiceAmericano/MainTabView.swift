@@ -20,10 +20,16 @@ struct MainTabView: View {
         TabView(selection: $selectedTab) {
             // HOME
             NavigationStack {
-                HomeViewPlaceholder()
-            }
-            .tabItem { Label("Home", systemImage: "house") }
-            .tag(0)
+                            HomeView(onSelectTab: { index in
+                                selectedTab = index
+                            })
+                            // 👇 This lets Home push InvoiceDetailView using NavigationLink(value: UUID)
+                            .navigationDestination(for: UUID.self) { invoiceId in
+                                InvoiceDetailView(invoiceId: invoiceId)
+                            }
+                        }
+                        .tabItem { Label("Home", systemImage: "house") }
+                        .tag(0)
 
             // INVOICES
             NavigationStack {

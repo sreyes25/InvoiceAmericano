@@ -16,6 +16,62 @@ private struct ActivityInsert: Encodable {
 }
 
 enum ActivityService {
+    
+    // Recent joined activity rows for the dashboard preview
+    static func fetchRecentActivityJoined(limit: Int = 5) async throws -> [ActivityJoined] {
+        let client = SupabaseManager.shared.client
+        // Make sure your ActivityJoined matches these columns
+        let rows: [ActivityJoined] = try await client
+          .from("invoice_activity")
+          .select("""
+            id,
+            invoice_id,
+            event,
+            created_at,
+            invoice:invoices!invoice_activity_invoice_id_fkey(
+              number,
+              client:clients(name)
+            )
+          """)
+          .order("created_at", ascending: false)
+          .limit(limit)
+          .execute()
+          .value
+        return rows
+    }
+    
+    // Debug: dump the raw JSON so we can confirm shape and fix models exactly.
+    // Safe to keep during development; remove when done.
+    static func debugDumpRecentActivityJSON(limit: Int = 5) async {
+        do {
+            let client = SupabaseManager.shared.client
+            let select = """
+                id,
+                    invoice_id,
+                    event,
+                    created_at,
+                    invoice:invoices!invoice_activity_invoice_id_fkey(
+                      number,
+                      client:clients(name)
+                    )
+            """
+            let resp = try await client
+                .from("invoice_activity")
+                .select(select)
+                .order("created_at", ascending: false)
+                .limit(limit)
+                .execute()
+
+            if let json = String(data: resp.data, encoding: .utf8) {
+                print("🔎 Activity JSON:\n\(json)")
+            } else {
+                print("🔎 Activity JSON: <non-utf8 \(resp.data.count) bytes>")
+            }
+        } catch {
+            print("🔎 Activity JSON dump failed: \(error)")
+        }
+    }
+    
     // Paged fetch for Activity tab
 
     static func fetchPage(offset: Int = 0, limit: Int = 50) async throws -> [ActivityEvent] {

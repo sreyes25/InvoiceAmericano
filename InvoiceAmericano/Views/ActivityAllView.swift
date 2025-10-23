@@ -34,25 +34,21 @@ struct ActivityAllView: View {
                 .padding(.top, 24)
             } else {
                 List {
+                    // Precompute groups & keys to keep expressions simple for the compiler
+                    let groups = groupByDay(items)
+                    let keys = groupedDayKeys(from: groups)
+
                     // Grouped-by-day sections
-                    ForEach(groupedDayKeys(items), id: \.self) { dayKey in
+                    ForEach(keys, id: \.self) { dayKey in
                         Section(header: Text(dayHeader(from: dayKey))) {
-                            let sectionItems = groupByDay(items)[dayKey] ?? []
+                            let sectionItems = groups[dayKey] ?? []
                             ForEach(sectionItems) { row in
-                                NavigationLink(value: row.invoice_id) {
-                                    HStack(spacing: 12) {
-                                        Image(systemName: icon(for: row.event))
-                                            .frame(width: 20)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(title(for: row))
-                                                .font(.subheadline).bold()
-                                            Text(relativeTime(row.created_at))
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
+                                if let id = row.invoice_id {
+                                    NavigationLink(value: id) {
+                                        activityRowCell(row)
                                     }
-                                    .padding(.vertical, 4)
+                                } else {
+                                    activityRowCell(row)
                                 }
                             }
                             .onDelete { offsets in
@@ -167,12 +163,12 @@ struct ActivityAllView: View {
     // MARK: - Row title / icon
 
     private func title(for row: ActivityJoined) -> String {
-        let number = row.invoice?.number
-        let client = row.invoice?.client?.name
+        let number = row.invoiceNumber
+        let client = row.clientName
 
         let label: String = {
-            if let n = number, !n.isEmpty { return "Invoice \(n)" }
-            return "Invoice " + row.invoice_id.uuidString.prefix(8)
+            if !number.isEmpty && number != "—" { return "Invoice \(number)" }
+            return "Invoice " + row.id.uuidString.prefix(8)
         }()
 
         let action: String
@@ -188,7 +184,7 @@ struct ActivityAllView: View {
         default:         action = row.event
         }
 
-        if let client, !client.isEmpty {
+        if !client.isEmpty && client != "—" {
             return "\(label) — \(action.capitalized) (\(client))"
         } else {
             return "\(label) — \(action.capitalized)"
@@ -207,6 +203,23 @@ struct ActivityAllView: View {
         case "due_soon": return "clock.badge.exclamationmark"
         default:         return "clock"
         }
+    }
+
+    @ViewBuilder
+    private func activityRowCell(_ row: ActivityJoined) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon(for: row.event))
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title(for: row))
+                    .font(.subheadline).bold()
+                Text(relativeTime(row.created_at))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - Time helpers
@@ -243,8 +256,12 @@ struct ActivityAllView: View {
         }
     }
 
+    private func groupedDayKeys(from groups: [String: [ActivityJoined]]) -> [String] {
+        groups.keys.sorted(by: >)
+    }
+
     private func groupedDayKeys(_ items: [ActivityJoined]) -> [String] {
-        groupByDay(items).keys.sorted(by: >)
+        groupedDayKeys(from: groupByDay(items))
     }
 
     private func dayHeader(from key: String) -> String {

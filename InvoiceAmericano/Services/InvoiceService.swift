@@ -51,6 +51,22 @@ enum InvoiceService {
         let paidCount: Int
         let outstandingAmount: Double   // sum of totals for open/sent/overdue
     }
+    
+    // Recent invoices, newest first (used by Home dashboard)
+    static func fetchRecentInvoices(limit: Int = 5) async throws -> [InvoiceRow] {
+        let client = SupabaseManager.shared.client
+        let rows: [InvoiceRow] = try await client
+            .from("invoices")
+            .select("""
+                id, number, status, total, currency, created_at, due_date, client_id,
+                client:clients!invoices_client_id_fkey(name)
+            """)
+            .order("created_at", ascending: false)
+            .limit(limit)
+            .execute()
+            .value
+        return rows
+    }
 
     static func fetchAccountStats() async throws -> AccountStats {
         let client = SupabaseManager.shared.client
