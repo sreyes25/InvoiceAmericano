@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SceneKit
 
 struct HomeView: View {
     // Parent can switch tabs if needed (0=Home, 1=Invoices, 2=Clients, 3=Activity, 4=Account)
@@ -31,8 +32,10 @@ struct HomeView: View {
 
                 // --- Summary cards ---
                 summaryCards
+
                 // --- Quick actions (now adaptive grid) ---
                 quickActions
+
                 if let errorText {
                     Text(errorText).foregroundStyle(.red)
                         .padding(.horizontal)
@@ -98,6 +101,8 @@ struct HomeView: View {
                 }
             }
         }
+
+        // AI Assistant sheet
         .sheet(isPresented: $showAISheet) {
             NavigationStack {
                 AIAssistantComingSoonSheet(onClose: { showAISheet = false })
@@ -125,7 +130,7 @@ struct HomeView: View {
         }
         .padding(.horizontal)
     }
-    
+
     private struct SummaryStatCard: View {
         let title: String
         let value: String
@@ -172,7 +177,7 @@ struct HomeView: View {
             .accessibilityLabel(Text("\(title): \(value)"))
         }
     }
-    
+
     private struct SummaryStatCardLarge: View {
         let title: String
         let value: String
@@ -221,7 +226,7 @@ struct HomeView: View {
                                     colors: [.blue, .indigo])
                 }
                 .buttonStyle(.plain)
-                
+
                 // Invoices -> slide up recent invoices
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -232,7 +237,7 @@ struct HomeView: View {
                                     colors: [.green, .teal])
                 }
                 .buttonStyle(.plain)
-                
+
                 // Activity -> slide up recent activity
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -243,14 +248,14 @@ struct HomeView: View {
                                     colors: [.purple, .pink])
                 }
                 .buttonStyle(.plain)
-                
-                // Ai Tools ->
+
+                // AI Assistant -> custom animated badge
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     showAISheet = true
                 } label: {
                     VStack(spacing: 10) {
-                        AIFluidBadge(size: 38)   // ⬅️ use the animated badge here
+                        AIMobius3DBadge(size: 45)
                         Text("AI Assistant")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
@@ -282,6 +287,7 @@ struct HomeView: View {
         }
     }
 
+    // You’re currently not showing these in the main body, but keeping them for reuse.
     private var invoicesList: some View {
         LazyVStack(spacing: 0) {
             if recentInvoices.isEmpty && !isLoading {
@@ -289,7 +295,6 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity).padding(.vertical, 12)
             } else {
                 ForEach(recentInvoices, id: \.id) { row in
-                    // Value-based link -> handled by MainTabView’s NavigationStack destination for UUID
                     NavigationLink(value: row.id) {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
@@ -325,7 +330,6 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity).padding(.vertical, 12)
             } else {
                 ForEach(recentActivity, id: \.id) { a in
-                    // If we have invoice_id, allow drill-in by UUID; otherwise show static row
                     if let id = a.invoice_id {
                         NavigationLink(value: id) {
                             activityRow(a)
@@ -446,147 +450,7 @@ struct HomeView: View {
     }
 }
 
-// A fluid, Apple-Intelligence-style animated orb
-// A fluid, Apple-style animated eye badge for the AI action
-private struct AIFluidBadge: View {
-    var size: CGFloat = 36
-
-    @State private var rotation: Angle = .degrees(0)
-    @State private var breathe = false
-
-    var body: some View {
-        ZStack {
-            // Outer eye (sclera)
-            Capsule()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.18), Color.white.opacity(0.06)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    )
-                )
-
-            // Eye outline
-            Capsule()
-                .strokeBorder(Color.white.opacity(0.35), lineWidth: 1.2)
-
-            // Iris
-            Circle()
-                .fill(
-                    AngularGradient(
-                        gradient: Gradient(colors: [.purple, .indigo, .blue, .cyan, .mint, .pink, .purple]),
-                        center: .center
-                    )
-                )
-                .frame(width: size * 0.46, height: size * 0.46)
-                .rotationEffect(rotation)
-                .scaleEffect(breathe ? 1.03 : 0.97) // gentle “alive” motion
-                .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
-
-            // Pupil
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [Color.white.opacity(0.9), Color.white.opacity(0.6)],
-                        center: .center,
-                        startRadius: 0, endRadius: size * 0.18
-                    )
-                )
-                .frame(width: size * 0.22, height: size * 0.22)
-
-            // Specular highlight
-            Circle()
-                .fill(Color.white.opacity(0.85))
-                .frame(width: size * 0.10, height: size * 0.10)
-                .offset(x: -size * 0.10, y: -size * 0.10)
-                .blur(radius: 0.2)
-        }
-        .frame(width: size * 1.35, height: size * 0.90) // eye aspect ratio
-        .onAppear {
-            withAnimation(.linear(duration: 6).repeatForever(autoreverses: false)) {
-                rotation = .degrees(360)
-            }
-            withAnimation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true)) {
-                breathe.toggle()
-            }
-        }
-    }
-}
-
-// ===== AI Assistant Coming Soon Sheet =====
-
-private struct AIAssistantComingSoonSheet: View {
-    var onClose: (() -> Void)? = nil
-
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "brain.head.profile")
-                .font(.system(size: 48))
-                .foregroundStyle(.purple)
-                .padding(.top, 40)
-
-            Text("AI Assistant")
-                .font(.title2.bold())
-
-            Text("""
-Your upcoming AI Assistant will help you work smarter:
-• Create invoices from photos or voice
-• Predict payments and trends
-• Suggest reminders for overdue clients
-• Give you instant business insights
-
-🚀 Coming in Version 2
-""")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
-
-            Spacer()
-
-            Button {
-                onClose?()
-            } label: {
-                Label("Notify Me When Available", systemImage: "bell.fill")
-                    .font(.headline)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color.purple.opacity(0.1))
-                    .cornerRadius(12)
-            }
-            .padding(.bottom, 30)
-        }
-        .padding()
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Done") { onClose?() }
-            }
-        }
-    }
-}
-
-// Pill used in Home list for recent invoices
-private struct StatusPill: View {
-    let status: String
-    var body: some View {
-        Text(status.capitalized)
-            .font(.caption2).bold()
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule().fill(color(for: status).opacity(0.15))
-            )
-            .foregroundStyle(color(for: status))
-    }
-
-    private func color(for s: String) -> Color {
-        switch s.lowercased() {
-        case "paid": return .green
-        case "sent": return .blue
-        case "overdue": return .red
-        case "open", "draft": return .orange
-        default: return .gray
-        }
-    }
-}
+// ===== Custom UI Pieces =====
 
 // Polished quick-action card
 private struct QuickActionCard: View {
@@ -622,6 +486,31 @@ private struct QuickActionCard: View {
                 .strokeBorder(Color.white.opacity(0.12))
         )
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+// Pill used in Home list for recent invoices
+private struct StatusPill: View {
+    let status: String
+    var body: some View {
+        Text(status.capitalized)
+            .font(.caption2).bold()
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                Capsule().fill(color(for: status).opacity(0.15))
+            )
+            .foregroundStyle(color(for: status))
+    }
+
+    private func color(for s: String) -> Color {
+        switch s.lowercased() {
+        case "paid": return .green
+        case "sent": return .blue
+        case "overdue": return .red
+        case "open", "draft": return .orange
+        default: return .gray
+        }
     }
 }
 
@@ -715,7 +604,7 @@ private struct StatusChip: View {
 private struct RecentActivitySheet: View {
     let recentActivity: [ActivityJoined]
     var onClose: (() -> Void)? = nil
-    
+
     var body: some View {
         List {
             Section {
@@ -734,7 +623,7 @@ private struct RecentActivitySheet: View {
                     }
                 }
             }
-            
+
             Section {
                 NavigationLink {
                     ActivityAllView()
@@ -751,9 +640,9 @@ private struct RecentActivitySheet: View {
             }
         }
     }
-    
+
     // MARK: - Row + helpers
-    
+
     @ViewBuilder
     private func row(_ a: ActivityJoined) -> some View {
         HStack(spacing: 12) {
@@ -768,7 +657,7 @@ private struct RecentActivitySheet: View {
         }
         .padding(.vertical, 6)
     }
-    
+
     private func titleFor(_ a: ActivityJoined) -> String {
         let number = a.invoiceNumber
         let client = a.clientName
@@ -788,7 +677,7 @@ private struct RecentActivitySheet: View {
         let left = number.isEmpty || number == "—" ? "Invoice" : "Invoice \(number)"
         return client == "—" ? "\(left) — \(action)" : "\(left) — \(action) (\(client))"
     }
-    
+
     private func iconFor(_ event: String) -> String {
         switch event {
         case "created":  return "doc.badge.plus"
@@ -802,7 +691,7 @@ private struct RecentActivitySheet: View {
         default:         return "bell"
         }
     }
-    // Inside RecentActivitySheet
+
     private func relativeTime(_ iso: String) -> String {
         // Try ISO with/without fractional seconds; fallback to yyyy-MM-dd
         let isoNoFS = ISO8601DateFormatter()
@@ -821,3 +710,682 @@ private struct RecentActivitySheet: View {
         return "just now"
     }
 }
+
+// ===== Custom AI badge (fix for missing AIMobiusBadge) =====
+
+//New MobiusStrip
+// === 3D Möbius strip badge (SceneKit) ===
+
+private struct AIMobius3DBadge: View {
+    var size: CGFloat = 30
+    var body: some View {
+        ZStack {
+            // subtle glow – does NOT clip content
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(LinearGradient(colors: [Color.white.opacity(0.10), Color.white.opacity(0.04)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .blur(radius: 2)
+
+            // 3D Möbius ribbon (no padding, no clipping)
+            MobiusSceneView()
+        }
+        // Give the 3D view generous height and keep aspect square so it won't crop
+        .frame(width: size * 1.2, height: size * 1.2)
+        .aspectRatio(1, contentMode: .fit)
+    }
+}
+
+private struct MobiusSceneView: UIViewRepresentable {
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView()
+        view.layer.masksToBounds = false
+        view.preferredFramesPerSecond = 60
+        view.rendersContinuously = true
+        view.allowsCameraControl = false
+        view.backgroundColor = .clear
+
+        // Scene
+        let scene = SCNScene()
+        view.scene = scene
+        view.isPlaying = true
+        view.antialiasingMode = .multisampling4X
+
+        // Camera
+        let cameraNode = SCNNode()
+        cameraNode.camera = SCNCamera()
+        cameraNode.position = SCNVector3(0, 0.05, 3.4)
+        if let cam = cameraNode.camera {
+            cam.wantsHDR = true
+            cam.bloomIntensity = 0.8
+            cam.bloomThreshold = 0.6
+            cam.bloomBlurRadius = 8.0
+            cam.fieldOfView = 38
+        }
+        scene.rootNode.addChildNode(cameraNode)
+
+        // Key light
+        let key = SCNNode()
+        key.light = SCNLight()
+        key.light?.type = .omni
+        key.position = SCNVector3(3, 4, 5)
+        key.light?.intensity = 1200
+        scene.rootNode.addChildNode(key)
+
+        // Rim light
+        let rim = SCNNode()
+        rim.light = SCNLight()
+        rim.light?.type = .directional
+        rim.eulerAngles = SCNVector3(-Float.pi/3, Float.pi/6, 0)
+        rim.light?.intensity = 900
+        scene.rootNode.addChildNode(rim)
+
+        // Ambient fill so the ribbon is always visible
+        let ambient = SCNNode()
+        ambient.light = SCNLight()
+        ambient.light?.type = .ambient
+        ambient.light?.intensity = 350
+        ambient.light?.color = UIColor(white: 1.0, alpha: 1.0)
+        scene.rootNode.addChildNode(ambient)
+
+        // Möbius node
+        let mobiusNode = SCNNode(geometry: makeMobiusGeometry(R: 1.0, width: 0.35, uCount: 180, vCount: 24))
+        mobiusNode.geometry?.firstMaterial = Self.makeMaterial()
+        mobiusNode.eulerAngles = SCNVector3(-0.25, 0.45, 0) // slight tilt
+        mobiusNode.scale = SCNVector3(0.75, 0.75, 0.75)
+        scene.rootNode.addChildNode(mobiusNode)
+
+        // Slow continuous spin + gentle bob
+        let spin = SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: CGFloat.pi * 2, z: 0, duration: 9.0))
+        let bobUp = SCNAction.moveBy(x: 0, y: 0.06, z: 0, duration: 1.8)
+        bobUp.timingMode = .easeInEaseOut
+        let bobDown = bobUp.reversed()
+        let bob = SCNAction.repeatForever(.sequence([bobUp, bobDown]))
+        mobiusNode.runAction(SCNAction.group([spin, bob]))
+
+        return view
+    }
+
+    func updateUIView(_ view: SCNView, context: Context) {}
+
+    private static func makeMaterial() -> SCNMaterial {
+        let m = SCNMaterial()
+        m.lightingModel = .physicallyBased
+
+        // Create a colorful gradient texture once and use it for both diffuse & emission.
+        let gradient = CAGradientLayer()
+        gradient.colors = [
+            UIColor.systemPink.cgColor,
+            UIColor.cyan.cgColor,
+            UIColor.systemBlue.cgColor,
+            UIColor.systemIndigo.cgColor,
+            UIColor.systemPurple.cgColor,
+            UIColor.systemPink.cgColor
+        ]
+        gradient.startPoint = CGPoint(x: 0, y: 0.5)
+        gradient.endPoint   = CGPoint(x: 1, y: 0.5)
+        gradient.frame = CGRect(x: 0, y: 0, width: 512, height: 512)
+        
+        let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
+        rotation.toValue = CGFloat.pi * 2
+        rotation.duration = 12
+        rotation.repeatCount = .infinity
+        gradient.add(rotation, forKey: "rotate")
+
+        UIGraphicsBeginImageContextWithOptions(gradient.frame.size, false, 2)
+        gradient.render(in: UIGraphicsGetCurrentContext()!)
+        let img = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+
+        // Use gradient for color + a soft glow to ensure visibility.
+        m.diffuse.contents = img
+        m.emission.contents = img
+        m.emission.intensity = 0.55
+
+        // Slightly glossy metal look
+        m.metalness.contents = 0.6
+        m.roughness.contents = 0.3
+
+        m.isDoubleSided = true
+        return m
+    }
+}
+
+// MARK: - Möbius generator
+/// Builds a Möbius strip mesh parameterized over (u, v):
+///  u in [0, 1] around the loop; v in [-1, 1] across the width.
+private func makeMobiusGeometry(R: Float, width: Float, uCount: Int, vCount: Int) -> SCNGeometry {
+    // Clamp counts
+    let U = max(12, uCount)
+    let V = max(2, vCount)
+
+    var vertices: [SCNVector3] = []
+    var normals:  [SCNVector3] = []
+    var uvs:      [CGPoint] = []
+    var indices:  [CInt] = []
+
+    func p(u: Float, v: Float) -> SIMD3<Float> {
+        // u ∈ [0, 1], v ∈ [-1, 1]
+        let theta = u * 2.0 * Float.pi                // loop angle
+        let halfTwist = theta / 2.0                   // half twist over one revolution
+        let w = (width * v)
+
+        // Center circle + rotated offset
+        let x = (R + w * cos(halfTwist)) * cos(theta)
+        let y = (R + w * cos(halfTwist)) * sin(theta)
+        let z =  w * sin(halfTwist)
+        return SIMD3<Float>(x, y, z)
+    }
+
+    // Generate grid
+    for ui in 0...U {
+        for vi in 0...V {
+            let uu = Float(ui) / Float(U)         // [0, 1]
+            let vv = (Float(vi) / Float(V)) * 2 - 1  // [-1, 1]
+
+            // Position
+            let pos = p(u: uu, v: vv)
+            vertices.append(SCNVector3(pos))
+
+            // Approximate normal via local derivatives
+            let eps: Float = 0.001
+            let pu = p(u: min(1, uu + eps), v: vv) - p(u: max(0, uu - eps), v: vv)
+            let pv = p(u: uu, v: min(1, vv + eps)) - p(u: uu, v: max(-1, vv - eps))
+            var n = simd_normalize(simd_cross(pu, pv))
+            if !(n.x.isFinite && n.y.isFinite && n.z.isFinite) || simd_length(n) == 0 {
+                n = SIMD3<Float>(0, 0, 1)
+            }
+            normals.append(SCNVector3(n))
+
+            // Simple UVs
+            uvs.append(CGPoint(x: CGFloat(uu), y: CGFloat((vv + 1) * 0.5)))
+        }
+    }
+
+    // Triangles
+    let stride = V + 1
+    for ui in 0..<U {
+        for vi in 0..<V {
+            let a = CInt(ui * stride + vi)
+            let b = CInt((ui + 1) * stride + vi)
+            let c = CInt((ui + 1) * stride + (vi + 1))
+            let d = CInt(ui * stride + (vi + 1))
+
+            // two triangles: a-b-c and a-c-d
+            indices.append(contentsOf: [a, b, c, a, c, d])
+        }
+    }
+
+    let vSrc = SCNGeometrySource(vertices: vertices)
+    let nSrc = SCNGeometrySource(normals: normals)
+    let tSrc = SCNGeometrySource(textureCoordinates: uvs)
+    let idxData = Data(bytes: indices, count: indices.count * MemoryLayout<CInt>.size)
+    let elem = SCNGeometryElement(data: idxData,
+                                  primitiveType: .triangles,
+                                  primitiveCount: indices.count / 3,
+                                  bytesPerIndex: MemoryLayout<CInt>.size)
+
+    let geo = SCNGeometry(sources: [vSrc, nSrc, tSrc], elements: [elem])
+    return geo
+}
+//-----
+
+// Mobius-like morphing loop shape
+private struct WobbleLoop: Shape {
+    // progress: 0...1, 0=base, 1=fully morphed
+    var progress: CGFloat
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width
+        let h = rect.height
+        let cx = w/2
+        let cy = h/2
+        let loops = 1.0
+        let points = 120
+        let baseR = min(w, h) * 0.42
+        let amplitude = baseR * (0.22 + 0.08 * progress)
+        let twist = .pi * (1 + progress)
+        let phase = progress * .pi
+        var path = Path()
+        for i in 0...points {
+            let t = Double(i) / Double(points)
+            let angle = t * 2 * .pi * loops
+            let r = baseR + amplitude * CGFloat(sin(angle * 2 + Double(phase)))
+            let x = cx + r * cos(CGFloat(angle + Double(twist) * CGFloat(t)))
+            let y = cy + r * sin(CGFloat(angle + Double(twist) * CGFloat(t)))
+            if i == 0 {
+                path.move(to: CGPoint(x: x, y: y))
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
+// Animated Mobius strip badge for AI
+// MARK: - Möbius badge (animated twisted ribbon)
+private struct AIMobiusBadge: View {
+    var size: CGFloat = 36
+    @State private var rot: Double = 0
+    @State private var breathe: Bool = false
+
+    private var loopWidth: CGFloat { size * 1.28 }
+    private var loopHeight: CGFloat { size * 0.80 }
+    private var lineWidth: CGFloat { max(1.8, size * 0.10) }
+
+    var body: some View {
+        ZStack {
+            // Soft glow behind the ribbon
+            MobiusStrip()
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            Color.cyan.opacity(0.28),
+                            Color.indigo.opacity(0.18),
+                            Color.purple.opacity(0.18)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: lineWidth * 1.9
+                )
+                .blur(radius: 4)
+                .opacity(0.9)
+
+            // Twisted ribbon stroke (the Möbius look)
+            MobiusStrip()
+                .stroke(
+                    LinearGradient(
+                        colors: [.cyan, .blue, .indigo, .purple, .pink, .cyan],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
+                )
+                .overlay {
+                    // subtle highlight band to sell the twist
+                    MobiusStrip()
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.55),
+                                    Color.white.opacity(0.00),
+                                    Color.white.opacity(0.35),
+                                    Color.white.opacity(0.00)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
+                            lineWidth: lineWidth * 0.45
+                        )
+                        .blendMode(.screen)
+                        .opacity(breathe ? 0.85 : 0.55)
+                        .animation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true),
+                                   value: breathe)
+                }
+
+            // A small traveling “specular” segment for life
+            MobiusStrip()
+                .trim(from: 0.84, to: 0.98)
+                .stroke(
+                    LinearGradient(colors: [.white, .clear],
+                                   startPoint: .leading,
+                                   endPoint: .trailing),
+                    style: StrokeStyle(lineWidth: lineWidth * 1.1, lineCap: .round)
+                )
+                .blur(radius: 0.4)
+        }
+        .frame(width: loopWidth, height: loopHeight)
+        .rotationEffect(.degrees(rot))
+        .shadow(color: .cyan.opacity(0.22), radius: 8)
+        .onAppear {
+            withAnimation(.linear(duration: 4.0).repeatForever(autoreverses: false)) {
+                rot = 360
+            }
+            breathe = true
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Möbius-like path
+/// A 2D twisted loop that suggests a Möbius strip by modulating an ellipse
+/// radius with a sin(2θ) term (gives the “half-twist” feel).
+private struct MobiusStrip: Shape {
+    var wobble: CGFloat = 0.18   // twist amplitude
+
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width, h = rect.height
+        let cx = w * 0.5, cy = h * 0.5
+        let a = min(w, h) * 0.45        // base x radius
+        let b = a * 0.65                // base y radius
+        let steps = 240
+
+        var path = Path()
+        var first = true
+
+        for i in 0...steps {
+            let t = Double(i) / Double(steps) * 2.0 * Double.pi
+            // sin(2t) modulates the radius → visually reads like a half-twist
+            let twist = wobble * CGFloat(sin(2.0 * t))
+            let x = cx + (a + a * twist) * CGFloat(cos(t))
+            let y = cy + (b - b * twist) * CGFloat(sin(t))
+            if first {
+                path.move(to: CGPoint(x: x, y: y))
+                first = false
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
+// MARK: - Solid Möbius badge (sculptural look)
+private struct AIMobiusSolidBadge: View {
+    var size: CGFloat = 36
+    @State private var spin: Double = 0
+    @State private var shimmer: CGFloat = 0
+
+    private var frame: CGSize { .init(width: size * 1.35, height: size * 0.92) }
+
+    var body: some View {
+        ZStack {
+            // Soft ambient glow behind
+            MobiusStrip(wobble: 0.20)
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.orange, Color.pink, Color.purple, Color.indigo],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: max(2.0, size * 0.16)
+                )
+                .blur(radius: 3.0)
+                .opacity(0.9)
+
+            // Filled ribbon (gives the sculptural “solid” look)
+            MobiusStrip(wobble: 0.20)
+                .fill(
+                    AngularGradient(
+                        gradient: Gradient(colors: [
+                            .cyan, .blue, .indigo, .purple, .pink, .cyan
+                        ]),
+                        center: .center
+                    )
+                )
+                .overlay(
+                    // Edge highlight that moves slowly (subtle shimmer)
+                    MobiusStrip(wobble: 0.20)
+                        .trim(from: shimmer, to: min(shimmer + 0.18, 1))
+                        .stroke(
+                            LinearGradient(colors: [.white.opacity(0.75), .clear],
+                                           startPoint: .leading, endPoint: .trailing),
+                            style: StrokeStyle(lineWidth: max(1.4, size * 0.10), lineCap: .round)
+                        )
+                        .shadow(color: .white.opacity(0.25), radius: 1.2)
+                        .mask(
+                            MobiusStrip(wobble: 0.20)
+                                .stroke(style: StrokeStyle(lineWidth: max(1.4, size * 0.10)))
+                        )
+                )
+                .overlay(
+                    // Inner shadow to enhance depth
+                    MobiusStrip(wobble: 0.20)
+                        .stroke(Color.black.opacity(0.20), lineWidth: max(0.8, size * 0.06))
+                        .blur(radius: 0.5)
+                        .blendMode(.multiply)
+                        .opacity(0.7)
+                )
+        }
+        .frame(width: frame.width, height: frame.height)
+        .rotationEffect(.degrees(spin))
+        .shadow(color: .cyan.opacity(0.20), radius: 6, y: 1)
+        .onAppear {
+            withAnimation(.linear(duration: 6.5).repeatForever(autoreverses: false)) {
+                spin = 360
+            }
+            withAnimation(.linear(duration: 3.8).repeatForever(autoreverses: false)) {
+                shimmer = 1
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+// ===== Apple‑style animated infinity ribbon (lemniscate) =====
+private struct InfinityRibbonShape: Shape {
+    // 0...1 phase for animating highlight position
+    var phase: CGFloat = 0
+    var animatableData: CGFloat {
+        get { phase }
+        set { phase = newValue }
+    }
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width, h = rect.height
+        let a = min(w, h) * 0.42
+        let cx = w/2, cy = h/2
+        let steps = 360
+        var p = Path()
+        var first = true
+        // Parametric lemniscate (Gerono): x = a * sin(t), y = a * sin(t) * cos(t)
+        for i in 0...steps {
+            let t = Double(i) / Double(steps) * 2.0 * Double.pi
+            let x = cx + a * CGFloat(sin(t))
+            let y = cy + a * CGFloat(sin(t) * cos(t))
+            if first { p.move(to: CGPoint(x: x, y: y)); first = false } else { p.addLine(to: CGPoint(x: x, y: y)) }
+        }
+        p.closeSubpath()
+        return p
+    }
+}
+
+private struct AIInfinityBadge: View {
+    var size: CGFloat = 36
+    @State private var phase: CGFloat = 0
+    @State private var wobble: CGFloat = 0
+    private var lineWidth: CGFloat { max(2.0, size * 0.10) }
+    private var frame: CGSize { .init(width: size * 1.6, height: size * 1.05) }
+
+    private var wobbleSin: CGFloat {
+        CGFloat(sin(Double(wobble) * 2.0 * .pi))
+    }
+
+    var body: some View {
+        ZStack {
+            // soft outer glow
+            InfinityRibbonShape()
+                .stroke(LinearGradient(colors: [Color.cyan.opacity(0.25), Color.purple.opacity(0.15)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: lineWidth*1.7)
+                .blur(radius: 3)
+                .opacity(0.9)
+
+            // main colorful ribbon stroke
+            InfinityRibbonShape()
+                .stroke(LinearGradient(colors: [.cyan, .blue, .indigo, .purple, .pink, .cyan], startPoint: .leading, endPoint: .trailing), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
+                .overlay(
+                    // subtle inner highlight band
+                    InfinityRibbonShape()
+                        .stroke(LinearGradient(colors: [Color.white.opacity(0.45), .clear, Color.white.opacity(0.35), .clear], startPoint: .leading, endPoint: .trailing), lineWidth: lineWidth*0.45)
+                        .blendMode(.screen)
+                        .opacity(0.65)
+                )
+
+            // traveling specular highlight (wrap-safe)
+            Group {
+                InfinityRibbonShape(phase: phase)
+                    .trim(from: phase, to: min(phase + 0.12, 1))
+                    .stroke(LinearGradient(colors: [.white, .clear], startPoint: .leading, endPoint: .trailing), style: StrokeStyle(lineWidth: lineWidth*1.1, lineCap: .round))
+                if phase + 0.12 > 1 {
+                    InfinityRibbonShape(phase: phase)
+                        .trim(from: 0, to: (phase + 0.12).truncatingRemainder(dividingBy: 1))
+                        .stroke(LinearGradient(colors: [.white, .clear], startPoint: .leading, endPoint: .trailing), style: StrokeStyle(lineWidth: lineWidth*1.1, lineCap: .round))
+                }
+            }
+        }
+        .frame(width: frame.width, height: frame.height)
+        .rotation3DEffect(
+            .degrees(16.0 * Double(wobbleSin)),
+            axis: (x: 0, y: 1, z: 0),
+            anchor: .trailing,
+            perspective: 0.9
+        )
+        .scaleEffect(
+            x: 1.0 + 0.14 * wobbleSin,
+            y: 1.0 - 0.10 * wobbleSin,
+            anchor: .trailing
+        )
+        .offset(x: (size * 0.14) * wobbleSin)
+        .rotationEffect(.degrees(4 * wobbleSin))
+        .onAppear {
+            withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) {
+                phase = 1
+            }
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+                wobble = 1
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+// MARK: - Coming Soon Sheet for AI Assistant
+private struct AIAssistantComingSoonSheet: View {
+    var onClose: (() -> Void)? = nil
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                AIMobius3DBadge(size: 64)
+                    .padding(.top, 20)
+
+                Text("AI Assistant")
+                    .font(.title2.bold())
+
+                Text("Coming in Version 2.0")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                Text("Soon, you’ll be able to integrate your smart glasses to take pictures & videos, record audible notes with translation for your assistant to auto‑generate the estimate or invoices for at your convenience.")
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+
+                Button("Done") {
+                    onClose?()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
+                .controlSize(.large)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal)
+        }
+        // Allow the sheet to grow and be scrolled to full height
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationContentInteraction(.scrolls)
+    }
+}
+// MARK: - AI Ouroboros Badge
+private struct AIOuroborosBadge: View {
+    var size: CGFloat = 36
+
+    @State private var spin: Double = 0
+    @State private var breathe: CGFloat = 0
+
+    var body: some View {
+        let ring = size
+        let lineW = max(1.8, size * 0.09)
+        let headSize = max(6, size * 0.22)
+        let radius = ring * 0.42
+
+        ZStack {
+            // soft glow halo
+            Circle()
+                .stroke(
+                    RadialGradient(
+                        colors: [Color.indigo.opacity(0.35), .clear],
+                        center: .center, startRadius: 0, endRadius: ring * 0.65
+                    ),
+                    lineWidth: lineW
+                )
+                .frame(width: ring, height: ring)
+                .blur(radius: 1.2)
+                .opacity(0.9)
+
+            // scales/body (subtle dashed arc that breathes)
+            Circle()
+                .trim(from: 0, to: 0.88)
+                .stroke(
+                    AngularGradient(
+                        gradient: Gradient(colors: [
+                            .cyan, .blue, .indigo, .purple, .cyan
+                        ]),
+                        center: .center,
+                        angle: .degrees(spin)
+                    ),
+                    style: StrokeStyle(
+                        lineWidth: lineW,
+                        lineCap: .round,
+                        dash: [max(1.2, lineW * 0.9), max(2.2, lineW * 1.6 + breathe)],
+                        dashPhase: breathe * 6
+                    )
+                )
+                .frame(width: ring, height: ring)
+                .rotationEffect(.degrees(-90))
+
+            // tail nib (tiny fade at the end of the trim)
+            Circle()
+                .fill(LinearGradient(colors: [.purple, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: lineW * 0.9, height: lineW * 0.9)
+                .offset(x: 0, y: -radius)
+                .rotationEffect(.degrees(spin + 220))
+
+            // head (simple, tasteful “snake head” with eye)
+            ZStack {
+                // head
+                Capsule(style: .continuous)
+                    .fill(
+                        LinearGradient(colors: [.cyan, .blue], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                    .frame(width: headSize * 1.1, height: headSize * 0.72)
+                    .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
+
+                // eye
+                Circle()
+                    .fill(Color.black.opacity(0.85))
+                    .frame(width: headSize * 0.22, height: headSize * 0.22)
+                    .offset(x: headSize * 0.18)
+                    .overlay(
+                        Circle()
+                            .fill(Color.white.opacity(0.6))
+                            .frame(width: headSize * 0.08)
+                            .offset(x: headSize * 0.22, y: -headSize * 0.06)
+                    )
+            }
+            .offset(x: 0, y: -radius)
+            .rotationEffect(.degrees(spin))
+
+        }
+        .frame(width: ring, height: ring)
+        .onAppear {
+            // smooth continuous spin
+            withAnimation(.linear(duration: 7).repeatForever(autoreverses: false)) {
+                spin = 360
+            }
+            // gentle breathing of the dash spacing
+            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) {
+                breathe = 1
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
