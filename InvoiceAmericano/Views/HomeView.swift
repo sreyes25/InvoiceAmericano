@@ -22,6 +22,7 @@ struct HomeView: View {
     @State private var showNewInvoice = false
     @State private var showInvoicesSheet = false
     @State private var showActivitySheet = false
+    @State private var showAISheet = false
 
     var body: some View {
         // MainTabView already wraps this in a NavigationStack
@@ -95,6 +96,11 @@ struct HomeView: View {
                 .navigationDestination(for: UUID.self) { invoiceId in
                     InvoiceDetailView(invoiceId: invoiceId)
                 }
+            }
+        }
+        .sheet(isPresented: $showAISheet) {
+            NavigationStack {
+                AIAssistantComingSoonSheet(onClose: { showAISheet = false })
             }
         }
 
@@ -215,7 +221,7 @@ struct HomeView: View {
                                     colors: [.blue, .indigo])
                 }
                 .buttonStyle(.plain)
-
+                
                 // Invoices -> slide up recent invoices
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -226,7 +232,7 @@ struct HomeView: View {
                                     colors: [.green, .teal])
                 }
                 .buttonStyle(.plain)
-
+                
                 // Activity -> slide up recent activity
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -235,6 +241,40 @@ struct HomeView: View {
                     QuickActionCard(title: "Activity",
                                     systemImage: "bell.badge.fill",
                                     colors: [.purple, .pink])
+                }
+                .buttonStyle(.plain)
+                
+                // Ai Tools ->
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    showAISheet = true
+                } label: {
+                    VStack(spacing: 10) {
+                        AIFluidBadge(size: 38)   // ⬅️ use the animated badge here
+                        Text("AI Assistant")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 96)
+                    .padding(.vertical, 12)
+                    .background(
+                        // darker “AI” gradient card for contrast
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.black.opacity(0.75), Color.indigo.opacity(0.85)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.12))
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
@@ -402,6 +442,123 @@ struct HomeView: View {
         case "sent":    return "Invoice \(inv) — Sent\(who == "—" ? "" : " (\(who))")"
         case "created": return "Invoice \(inv) — Created\(who == "—" ? "" : " (\(who))")"
         default:        return "Invoice \(inv) — \(a.event.capitalized)\(who == "—" ? "" : " (\(who))")"
+        }
+    }
+}
+
+// A fluid, Apple-Intelligence-style animated orb
+// A fluid, Apple-style animated eye badge for the AI action
+private struct AIFluidBadge: View {
+    var size: CGFloat = 36
+
+    @State private var rotation: Angle = .degrees(0)
+    @State private var breathe = false
+
+    var body: some View {
+        ZStack {
+            // Outer eye (sclera)
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.18), Color.white.opacity(0.06)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                )
+
+            // Eye outline
+            Capsule()
+                .strokeBorder(Color.white.opacity(0.35), lineWidth: 1.2)
+
+            // Iris
+            Circle()
+                .fill(
+                    AngularGradient(
+                        gradient: Gradient(colors: [.purple, .indigo, .blue, .cyan, .mint, .pink, .purple]),
+                        center: .center
+                    )
+                )
+                .frame(width: size * 0.46, height: size * 0.46)
+                .rotationEffect(rotation)
+                .scaleEffect(breathe ? 1.03 : 0.97) // gentle “alive” motion
+                .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+
+            // Pupil
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color.white.opacity(0.9), Color.white.opacity(0.6)],
+                        center: .center,
+                        startRadius: 0, endRadius: size * 0.18
+                    )
+                )
+                .frame(width: size * 0.22, height: size * 0.22)
+
+            // Specular highlight
+            Circle()
+                .fill(Color.white.opacity(0.85))
+                .frame(width: size * 0.10, height: size * 0.10)
+                .offset(x: -size * 0.10, y: -size * 0.10)
+                .blur(radius: 0.2)
+        }
+        .frame(width: size * 1.35, height: size * 0.90) // eye aspect ratio
+        .onAppear {
+            withAnimation(.linear(duration: 6).repeatForever(autoreverses: false)) {
+                rotation = .degrees(360)
+            }
+            withAnimation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true)) {
+                breathe.toggle()
+            }
+        }
+    }
+}
+
+// ===== AI Assistant Coming Soon Sheet =====
+
+private struct AIAssistantComingSoonSheet: View {
+    var onClose: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "brain.head.profile")
+                .font(.system(size: 48))
+                .foregroundStyle(.purple)
+                .padding(.top, 40)
+
+            Text("AI Assistant")
+                .font(.title2.bold())
+
+            Text("""
+Your upcoming AI Assistant will help you work smarter:
+• Create invoices from photos or voice
+• Predict payments and trends
+• Suggest reminders for overdue clients
+• Give you instant business insights
+
+🚀 Coming in Version 2
+""")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+
+            Spacer()
+
+            Button {
+                onClose?()
+            } label: {
+                Label("Notify Me When Available", systemImage: "bell.fill")
+                    .font(.headline)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.purple.opacity(0.1))
+                    .cornerRadius(12)
+            }
+            .padding(.bottom, 30)
+        }
+        .padding()
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Done") { onClose?() }
+            }
         }
     }
 }
