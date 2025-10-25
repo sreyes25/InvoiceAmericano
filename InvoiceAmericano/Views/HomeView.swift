@@ -59,8 +59,8 @@ struct HomeView: View {
 
         // New invoice sheet
         .sheet(isPresented: $showNewInvoice) {
-            NavigationStack {
-                NewInvoiceView { draft in
+            ThemedNewInvoiceSheet(
+                onSaved: { draft in
                     Task {
                         do {
                             _ = try await InvoiceService.createInvoice(from: draft)
@@ -70,8 +70,14 @@ struct HomeView: View {
                             await MainActor.run { errorText = error.localizedDescription }
                         }
                     }
-                }
-            }
+                },
+                onClose: { showNewInvoice = false }
+            )
+            // Keep it tall and on-brand
+            .presentationDetents([.fraction(0.90), .large])   // lets users pull higher if needed
+            .presentationCornerRadius(28)
+            .presentationDragIndicator(.hidden)               // we draw our own
+            .presentationBackground(.ultraThinMaterial)       // subtle glass
         }
 
         // Recent Invoices sheet
@@ -224,8 +230,11 @@ struct HomeView: View {
                     QuickActionCard(title: "New",
                                     systemImage: "plus.circle.fill",
                                     colors: [.blue, .indigo])
+                                    .scaleEffect(showNewInvoice ? 0.97 : 1.0)
+                                    .animation(.spring(response: 0.4, dampingFraction: 0.7), value: showNewInvoice)
                 }
                 .buttonStyle(.plain)
+                
 
                 // Invoices -> slide up recent invoices
                 Button {
@@ -1389,3 +1398,72 @@ private struct AIOuroborosBadge: View {
     }
 }
 
+// MARK: - Themed "New Invoice" Sheet
+
+private struct ThemedNewInvoiceSheet: View {
+    let onSaved: (InvoiceDraft) -> Void
+    var onClose: (() -> Void)? = nil
+
+    // Match the "New" quick action gradient
+    private let gradient = LinearGradient(
+        colors: [Color.blue, Color.indigo],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                // Background glow that matches the tile
+                gradient.opacity(0.20)
+                    .ignoresSafeArea()
+
+                // Content card
+                VStack(spacing: 0) {
+                    // Grabber + title area
+                    VStack(spacing: 10) {
+                        Capsule()
+                            .fill(.secondary.opacity(0.35))
+                            .frame(width: 36, height: 5)
+                            .padding(.top, 8)
+
+                        HStack {
+                            Label("New Invoice", systemImage: "plus.circle.fill")
+                                .font(.headline.bold())
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Button {
+                                onClose?()
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.headline)
+                                    .foregroundStyle(.secondary)
+                                    .padding(8)
+                                    .background(.ultraThinMaterial, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
+                    }
+                    .background(.ultraThinMaterial)
+
+                    // Your invoice form
+                    NewInvoiceView(onSaved: onSaved)
+                        .scrollContentBackground(.hidden) // Form blends into our bg
+                        .background(Color.clear)
+                        .tint(.indigo) // controls buttons/links inside the form
+                }
+                .background(
+                    // Soft card behind the form for contrast
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(.background) // adapts to light/dark
+                        .shadow(color: .black.opacity(0.08), radius: 18, y: 6)
+                        .ignoresSafeArea()
+                )
+            }
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(.clear, for: .navigationBar)
+        }
+    }
+}

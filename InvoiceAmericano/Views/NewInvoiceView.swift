@@ -111,32 +111,58 @@ struct NewInvoiceView: View {
             }
 
             // --- Line Items ---
+            // MARK: - Items
             Section("Items") {
-                if draft.items.isEmpty {
-                    Text("Add at least one line item").foregroundStyle(.secondary)
-                }
-                ForEach($draft.items) { $item in
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField("Description", text: $item.description)
-                        HStack {
-                            Stepper("Qty: \(item.quantity)", value: $item.quantity, in: 1...999)
-                            Spacer()
-                            HStack {
-                                Text("Unit")
-                                TextField("0.00", value: $item.unitPrice, format: .number)
-                                    .keyboardType(.decimalPad)
-                                    .frame(width: 100)
-                                    .multilineTextAlignment(.trailing)
+                // Quick add presets (optional)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(["Service call", "Labor hour", "Materials", "Cleanup"], id: \.self) { label in
+                            Button(label) {
+                                draft.items.append(LineItemDraft(description: label, quantity: 1, unitPrice: 0))
                             }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                         }
                     }
+                    .padding(.vertical, 4)
                 }
-                .onDelete { idx in draft.items.remove(atOffsets: idx) }
 
+                // Line items
+                ForEach($draft.items) { $item in
+                    LineItemCard(
+                        description: $item.description,
+                        quantity: $item.quantity,
+                        unitPrice: $item.unitPrice
+                    )
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            if let i = draft.items.firstIndex(where: { $0.id == item.id }) {
+                                draft.items.remove(at: i)
+                            }
+                        } label: { Label("Delete", systemImage: "trash") }
+                    }
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            // duplicate
+                            let copy = LineItemDraft(description: item.description, quantity: item.quantity, unitPrice: item.unitPrice)
+                            if let i = draft.items.firstIndex(where: { $0.id == item.id }) {
+                                draft.items.insert(copy, at: i + 1)
+                            } else {
+                                draft.items.append(copy)
+                            }
+                        } label: { Label("Duplicate", systemImage: "doc.on.doc") }
+                        .tint(.blue)
+                    }
+                }
+                .onMove { from, to in draft.items.move(fromOffsets: from, toOffset: to) }
+                .onDelete { draft.items.remove(atOffsets: $0) }
+
+                // Add item button
                 Button {
                     draft.items.append(LineItemDraft())
                 } label: {
-                    Label("Add item", systemImage: "plus.circle")
+                    Label("Add item", systemImage: "plus.circle.fill")
                 }
             }
 
@@ -233,5 +259,103 @@ struct NewInvoiceView: View {
         f.numberStyle = .currency
         f.currencyCode = code.uppercased()
         return f.string(from: NSNumber(value: value)) ?? "\(value)"
+    }
+}
+
+
+//Helper for form
+// A friendlier card with big qty buttons, currency field and per-line total
+private struct LineItemCard: View {
+    @Binding var description: String
+    @Binding var quantity: Int
+    @Binding var unitPrice: Double
+
+    @FocusState private var focusedField: Field?
+    enum Field { case desc, price }
+
+    private static let currencyFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = "USD"
+        f.maximumFractionDigits = 2
+        return f
+    }()
+
+    private var lineTotal: Double { Double(quantity) * unitPrice }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Top row: description + line total
+            HStack(alignment: .firstTextBaseline) {
+                TextField("Describe the work (e.g. \"Drywall patch in hallway\")", text: $description)
+                    .textInputAutocapitalization(.sentences)
+                    .focused($focusedField, equals: .desc)
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(lineTotal, format: .currency(code: "USD"))
+                        .font(.headline)
+                    Text("Line total")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(minWidth: 96, alignment: .trailing)
+            }
+
+            // Middle row: quantity controls + unit price
+            HStack(spacing: 12) {
+                // Qty with big buttons
+                HStack(spacing: 0) {
+                    Button { quantity = max(1, quantity - 1) } label: {
+                        Image(systemName: "minus")
+                            .frame(width: 34, height: 34)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Text("\(quantity)")
+                        .font(.headline)
+                        .frame(minWidth: 38)
+
+                    Button { quantity = min(999, quantity + 1) } label: {
+                        Image(systemName: "plus")
+                            .frame(width: 34, height: 34)
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Spacer()
+
+                // Unit price (currency)
+                VStack(alignment: .trailing, spacing: 2) {
+                    TextField("Unit price", value: $unitPrice, formatter: Self.currencyFormatter)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 120)
+                        .focused($focusedField, equals: .price)
+                        .toolbar { keyboardToolbar }
+                    Text("Per unit")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+    }
+
+    // Small “calculator-ish” keyboard toolbar
+    @ToolbarContentBuilder
+    private var keyboardToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .keyboard) {
+            Button("−10") { unitPrice = max(0, unitPrice - 10) }
+            Button("−1")  { unitPrice = max(0, unitPrice - 1)  }
+            Spacer()
+            Button("+1")  { unitPrice += 1 }
+            Button("+10") { unitPrice += 10 }
+            Button("Done") { focusedField = nil }
+                .font(.headline)
+        }
     }
 }
