@@ -524,45 +524,124 @@ private struct StatusPill: View {
 }
 
 // ===== Sheets =====
-
 private struct RecentInvoicesSheet: View {
+    enum Filter: String, CaseIterable { case all, open, sent, paid, overdue }
+
     let recentInvoices: [InvoiceRow]
     var onClose: (() -> Void)? = nil
 
+    @State private var filter: Filter = .all
+    @State private var search = ""
+
+    // --- derived list ---
+    private var filtered: [InvoiceRow] {
+        let base = recentInvoices.filter { inv in
+            guard !search.isEmpty else { return true }
+            let hay = "\(inv.number) \(inv.client?.name ?? "")".lowercased()
+            return hay.contains(search.lowercased())
+        }
+        guard filter != .all else { return base }
+        return base.filter { inv in
+            switch filter {
+            case .all: return true
+            case .open: return inv.status == "open" && inv.sent_at == nil
+            case .sent: return inv.status == "open" && inv.sent_at != nil
+            case .paid: return inv.status == "paid"
+            case .overdue: return inv.status == "overdue"
+            }
+        }
+    }
+
     var body: some View {
         List {
+            // Header controls
             Section {
-                if recentInvoices.isEmpty {
-                    Text("No recent invoices")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(recentInvoices) { inv in
-                        NavigationLink(value: inv.id) {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(inv.number).font(.subheadline).bold()
-                                    Text(inv.client?.name ?? "—")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 8) {
+                    // Quick filter chips
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(Filter.allCases, id: \.self) { f in
+                                Button {
+                                    filter = f
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: icon(for: f))
+                                        Text(title(for: f))
+                                    }
+                                    .font(.footnote.weight(.semibold))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        Capsule().fill(
+                                            filter == f
+                                            ? Color.blue.opacity(0.18)
+                                            : Color(.secondarySystemBackground)
+                                        )
+                                    )
+                                    .overlay(
+                                        Capsule().strokeBorder(
+                                            filter == f ? Color.blue.opacity(0.35)
+                                                        : Color.black.opacity(0.06)
+                                        )
+                                    )
                                 }
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 4) {
-                                    Text(currency(inv.total))
-                                        .font(.subheadline)
-                                    StatusChip(status: displayStatus(inv))
-                                }
+                                .buttonStyle(.plain)
                             }
-                            .padding(.vertical, 6)
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                    // Search
+                    TextField("Search by number or client", text: $search)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                }
+                .listRowInsets(.init(top: 8, leading: 16, bottom: 4, trailing: 16))
+            }
+
+            // Invoices
+            Section {
+                if filtered.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "doc.text.magnifyingglass").font(.title2)
+                        Text(emptyCopy)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 28)
+                } else {
+                    ForEach(filtered) { inv in
+                        NavigationLink(value: inv.id) {
+                            InvoiceCardRow(inv: inv)
+                        }
+                        // trailing swipe: Send
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button {
+                                // TODO: integrate send flow
+                                // await InvoiceService.sendInvoice(id: inv.id)
+                            } label: { Label("Send", systemImage: "paperplane") }
+                            .tint(.blue)
+                        }
+                        // leading swipe: Mark Paid
+                        .swipeActions(edge: .leading) {
+                            Button {
+                                // TODO: integrate mark paid
+                                // await InvoiceService.markPaid(id: inv.id)
+                            } label: { Label("Mark Paid", systemImage: "checkmark.seal") }
+                            .tint(.green)
                         }
                     }
                 }
             }
 
+            // Footer
             Section {
                 NavigationLink {
                     InvoiceListView()
                 } label: {
-                    Label("View all invoices", systemImage: "list.bullet.rectangle")
+                    Label("Open full invoices list", systemImage: "list.bullet.rectangle")
                 }
             }
         }
@@ -575,16 +654,110 @@ private struct RecentInvoicesSheet: View {
         }
     }
 
-    // local helpers so this view is self-contained
+    // MARK: - Small helpers
+    private func title(for f: Filter) -> String {
+        switch f {
+        case .all: return "All"
+        case .open: return "Open"
+        case .sent: return "Sent"
+        case .paid: return "Paid"
+        case .overdue: return "Overdue"
+        }
+    }
+    private func icon(for f: Filter) -> String {
+        switch f {
+        case .all: return "line.3.horizontal.decrease.circle"
+        case .open: return "clock"
+        case .sent: return "paperplane"
+        case .paid: return "checkmark.seal"
+        case .overdue: return "exclamationmark.triangle"
+        }
+    }
+    private var emptyCopy: String {
+        search.isEmpty ? "No invoices for this filter yet" : "No results for “\(search)”"
+    }
+}
+
+// ==============================
+// Card-style row used above
+// ==============================
+private struct InvoiceCardRow: View {
+    let inv: InvoiceRow
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            // Left icon
+            ZStack {
+                RoundedRectangle(cornerRadius: 10).fill(gradient)
+                Image(systemName: "doc.text")
+                    .foregroundStyle(.white)
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .frame(width: 36, height: 36)
+
+            // Title & client
+            VStack(alignment: .leading, spacing: 2) {
+                Text(inv.number).font(.subheadline.weight(.semibold))
+                Text(inv.client?.name ?? "—")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            // Amount + status
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(currency(inv.total))
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                StatusPillSmall(text: displayStatus(inv))
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color.black.opacity(0.05))
+        )
+    }
+
+    private var gradient: LinearGradient {
+        LinearGradient(colors: [.blue, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+    private func displayStatus(_ inv: InvoiceRow) -> String {
+        if inv.status == "open", inv.sent_at != nil { return "Sent" }
+        return inv.status.capitalized
+    }
     private func currency(_ total: Double?) -> String {
         let n = NumberFormatter()
         n.numberStyle = .currency
         n.currencyCode = "USD"
         return n.string(from: NSNumber(value: total ?? 0)) ?? "$0.00"
     }
-    private func displayStatus(_ inv: InvoiceRow) -> String {
-        if inv.status == "open", inv.sent_at != nil { return "sent" }
-        return inv.status
+}
+
+// small chip to match Home
+private struct StatusPillSmall: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.caption2).bold()
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(color.opacity(0.15))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
+    }
+    private var color: Color {
+        switch text.lowercased() {
+        case "paid": return .green
+        case "overdue": return .red
+        case "sent": return .blue
+        case "open", "draft": return .orange
+        default: return .gray
+        }
     }
 }
 
@@ -610,34 +783,136 @@ private struct StatusChip: View {
     }
 }
 
+// RecentActivitySheet
 private struct RecentActivitySheet: View {
+    enum Filter: String, CaseIterable {
+        case all, created, sent, opened, paid, dueSoon, overdue
+    }
+
     let recentActivity: [ActivityJoined]
     var onClose: (() -> Void)? = nil
 
+    @State private var filter: Filter = .all
+    @State private var search = ""
+
+    // MARK: - Derived list
+    private var filtered: [ActivityJoined] {
+        let base = recentActivity.filter { a in
+            guard !search.isEmpty else { return true }
+            let hay = "\(a.invoiceNumber) \(a.clientName)".lowercased()
+            return hay.contains(search.lowercased())
+        }
+        guard filter != .all else { return base }
+        return base.filter { a in
+            switch filter {
+            case .all:      return true
+            case .created:  return a.event == "created"
+            case .sent:     return a.event == "sent"
+            case .opened:   return a.event == "opened"
+            case .paid:     return a.event == "paid"
+            case .dueSoon:  return a.event == "due_soon"
+            case .overdue:  return a.event == "overdue"
+            }
+        }
+    }
+
     var body: some View {
         List {
+            // Header controls
             Section {
-                if recentActivity.isEmpty {
-                    Text("No recent activity")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(recentActivity) { a in
-                        if let id = a.invoice_id {
-                            NavigationLink(value: id) {
-                                row(a)
+                VStack(alignment: .leading, spacing: 8) {
+                    // Filters
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(Filter.allCases, id: \.self) { f in
+                                Button {
+                                    filter = f
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: iconFor(filter: f))
+                                        Text(titleFor(filter: f))
+                                    }
+                                    .font(.footnote.weight(.semibold))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        Capsule().fill(
+                                            filter == f
+                                            ? Color.purple.opacity(0.18)
+                                            : Color(.secondarySystemBackground)
+                                        )
+                                    )
+                                    .overlay(
+                                        Capsule().strokeBorder(
+                                            filter == f ? Color.purple.opacity(0.35)
+                                                        : Color.black.opacity(0.06)
+                                        )
+                                    )
+                                }
+                                .buttonStyle(.plain)
                             }
-                        } else {
-                            row(a)
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                    // Search
+                    TextField("Search by invoice or client", text: $search)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                }
+                .listRowInsets(.init(top: 8, leading: 16, bottom: 4, trailing: 16))
+            }
+
+            // Grouped by day sections
+            let groups = groupByDay(filtered)
+            let keys = groupedDayKeys(from: groups)
+
+            if filtered.isEmpty {
+                Section {
+                    VStack(spacing: 8) {
+                        Image(systemName: "bell.slash").font(.title2)
+                        Text(search.isEmpty ? "No activity for this filter yet" : "No results for “\(search)”")
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 28)
+                }
+            } else {
+                ForEach(keys, id: \.self) { dayKey in
+                    Section(header: Text(dayHeader(from: dayKey))) {
+                        let rows = groups[dayKey] ?? []
+                        ForEach(rows) { a in
+                            // If we have an invoice ID, allow drill-in via value navigation
+                            Group {
+                                if let id = a.invoice_id {
+                                    NavigationLink(value: id) { ActivityCardRow(a: a) }
+                                } else {
+                                    ActivityCardRow(a: a)
+                                }
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    Task {
+                                        try? await ActivityService.delete(id: a.id)
+                                        await recalcAndBroadcastUnread()
+                                    }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                         }
                     }
                 }
             }
 
+            // Footer
             Section {
                 NavigationLink {
                     ActivityAllView()
                 } label: {
-                    Label("Open full feed", systemImage: "list.bullet.rectangle")
+                    Label("Open full activity feed", systemImage: "list.bullet.rectangle")
                 }
             }
         }
@@ -650,21 +925,145 @@ private struct RecentActivitySheet: View {
         }
     }
 
-    // MARK: - Row + helpers
+    // MARK: - Helpers (self-contained)
 
-    @ViewBuilder
-    private func row(_ a: ActivityJoined) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: iconFor(a.event))
-                .frame(width: 22)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(titleFor(a)).font(.subheadline)
-                Text(relativeTime(a.created_at))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
+    private func titleFor(filter f: Filter) -> String {
+        switch f {
+        case .all: return "All"
+        case .created: return "Created"
+        case .sent: return "Sent"
+        case .opened: return "Opened"
+        case .paid: return "Paid"
+        case .dueSoon: return "Due Soon"
+        case .overdue: return "Overdue"
         }
-        .padding(.vertical, 6)
+    }
+    private func iconFor(filter f: Filter) -> String {
+        switch f {
+        case .all: return "line.3.horizontal.decrease.circle"
+        case .created: return "doc.badge.plus"
+        case .sent: return "paperplane"
+        case .opened: return "eye"
+        case .paid: return "checkmark.seal"
+        case .dueSoon: return "clock.badge.exclamationmark"
+        case .overdue: return "exclamationmark.triangle"
+        }
+    }
+
+    // Sectioning
+    private func groupByDay(_ items: [ActivityJoined]) -> [String: [ActivityJoined]] {
+        Dictionary(grouping: items) { row in
+            dayKey(for: isoDate(from: row.created_at))
+        }
+    }
+    private func groupedDayKeys(from groups: [String: [ActivityJoined]]) -> [String] {
+        groups.keys.sorted(by: >)
+    }
+    private func dayKey(for date: Date) -> String {
+        let f = DateFormatter()
+        f.calendar = .current
+        f.locale = .init(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: date)
+    }
+    private func dayHeader(from key: String) -> String {
+        let f = DateFormatter()
+        f.calendar = .current
+        f.locale = .init(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: key) else { return key }
+        if Calendar.current.isDateInToday(d) { return "Today" }
+        if Calendar.current.isDateInYesterday(d) { return "Yesterday" }
+        let out = DateFormatter()
+        out.dateStyle = .medium
+        out.timeStyle = .none
+        return out.string(from: d)
+    }
+
+    // Time + unread
+    private func isoDate(from s: String) -> Date {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: s) ?? Date()
+    }
+    private func relativeTime(_ s: String) -> String {
+        let d = isoDate(from: s)
+        let r = RelativeDateTimeFormatter()
+        r.unitsStyle = .short
+        return r.localizedString(for: d, relativeTo: Date())
+    }
+    private func recalcAndBroadcastUnread() async {
+        let n = (try? await ActivityService.countUnread()) ?? 0
+        await MainActor.run {
+            NotificationCenter.default.post(
+                name: .activityUnreadChanged,
+                object: nil,
+                userInfo: ["count": n]
+            )
+        }
+    }
+}
+
+
+// Card-style activity row
+
+private struct ActivityCardRow: View {
+    let a: ActivityJoined
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(iconGradient)
+                Image(systemName: iconFor(a.event))
+                    .foregroundStyle(.white)
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .frame(width: 36, height: 36)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(titleFor(a))
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                Text(relativeTime(a.created_at))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            // Tiny status chip when event implies a state
+            if let chip = statusChipText(a.event) {
+                StatusPillTiny(text: chip)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color.black.opacity(0.05))
+        )
+    }
+
+    private var iconGradient: LinearGradient {
+        let colors: [Color]
+        switch a.event {
+        case "created":  colors = [.blue, .indigo]
+        case "sent":     colors = [.teal, .blue]
+        case "opened":   colors = [.purple, .pink]
+        case "paid":     colors = [.green, .teal]
+        case "due_soon": colors = [.orange, .pink]
+        case "overdue":  colors = [.red, .orange]
+        default:         colors = [.gray, .gray.opacity(0.7)]
+        }
+        return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
     private func titleFor(_ a: ActivityJoined) -> String {
@@ -676,8 +1075,6 @@ private struct RecentActivitySheet: View {
             case "sent":     return "Sent"
             case "opened":   return "Opened"
             case "paid":     return "Paid"
-            case "archived": return "Archived"
-            case "deleted":  return "Deleted"
             case "overdue":  return "Overdue"
             case "due_soon": return "Due Soon"
             default:         return a.event.capitalized
@@ -693,36 +1090,56 @@ private struct RecentActivitySheet: View {
         case "opened":   return "eye"
         case "sent":     return "paperplane"
         case "paid":     return "checkmark.seal"
-        case "archived": return "archivebox"
-        case "deleted":  return "trash"
         case "overdue":  return "exclamationmark.triangle"
         case "due_soon": return "clock.badge.exclamationmark"
         default:         return "bell"
         }
     }
 
-    private func relativeTime(_ iso: String) -> String {
-        // Try ISO with/without fractional seconds; fallback to yyyy-MM-dd
-        let isoNoFS = ISO8601DateFormatter()
-        isoNoFS.formatOptions = [.withInternetDateTime]
-        let isoFS = ISO8601DateFormatter()
-        isoFS.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let ymd = DateFormatter()
-        ymd.dateFormat = "yyyy-MM-dd"
-        ymd.timeZone = TimeZone(secondsFromGMT: 0)
+    private func relativeTime(_ s: String) -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: s) {
+            let r = RelativeDateTimeFormatter()
+            r.unitsStyle = .short
+            return r.localizedString(for: d, relativeTo: Date())
+        }
+        return s
+    }
 
-        let d = isoNoFS.date(from: iso) ?? isoFS.date(from: iso) ?? ymd.date(from: iso) ?? Date()
-        let comps = Calendar.current.dateComponents([.minute,.hour,.day], from: d, to: Date())
-        if let day = comps.day, day > 0 { return "\(day)d ago" }
-        if let hour = comps.hour, hour > 0 { return "\(hour)h ago" }
-        if let min = comps.minute, min > 0 { return "\(min)m ago" }
-        return "just now"
+    private func statusChipText(_ event: String) -> String? {
+        switch event {
+        case "paid": return "Paid"
+        case "overdue": return "Overdue"
+        case "sent": return "Sent"
+        default: return nil
+        }
+    }
+}
+
+// tiny chip used on activity rows
+private struct StatusPillTiny: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.caption2).bold()
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(color.opacity(0.15))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
+    }
+    private var color: Color {
+        switch text.lowercased() {
+        case "paid": return .green
+        case "overdue": return .red
+        case "sent": return .blue
+        default: return .gray
+        }
     }
 }
 
 // ===== Custom AI badge (fix for missing AIMobiusBadge) =====
 
-//New MobiusStrip
 // === 3D Möbius strip badge (SceneKit) ===
 
 private struct AIMobius3DBadge: View {
