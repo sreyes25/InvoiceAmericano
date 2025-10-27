@@ -21,7 +21,11 @@ final class AuthViewModel: ObservableObject {
         // Non-throwing, no await
         let uid = AuthService.currentUserIDFast()
         isAuthed = (uid != nil)
-        if let uid { print("DEBUG: session userID =", uid) } else { print("DEBUG: no session") }
+        if let uid {
+            print("DEBUG: session userID =", uid)
+        } else {
+            print("DEBUG: no session")
+        }
     }
 
     func signUp() async {
@@ -37,6 +41,7 @@ final class AuthViewModel: ObservableObject {
             // After sign-in, check quickly for a session
             let uid = AuthService.currentUserIDFast()
             self.isAuthed = (uid != nil)
+            NotificationCenter.default.post(name: .authDidChange, object: nil)
             print("DEBUG: post-login userID =", uid ?? "nil")
             if uid == nil {
                 self.error = "Logged in, but no session found. Check Supabase email confirmation setting."
@@ -49,6 +54,7 @@ final class AuthViewModel: ObservableObject {
             try await AuthService.signOut()
             self.isAuthed = false
             self.email = ""; self.password = ""
+            NotificationCenter.default.post(name: .authDidChange, object: nil)
             print("DEBUG: signed out")
         }
     }
