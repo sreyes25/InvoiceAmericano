@@ -25,47 +25,72 @@ struct BrandingView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        Form {
-            Section(header: Text("Business")) {
-                TextField("Business name", text: $businessName)
-                    .textInputAutocapitalization(.words)
-                TextField("Tagline (optional)", text: $tagline)
+        ScrollView {
+            VStack(spacing: 20) {
+                businessInfoCard
+                logoCard
+                accentColorCard
+                if let errorText { Text(errorText).foregroundStyle(.red).font(.footnote) }
+                saveButton
             }
+            .padding()
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Branding")
+        .task { await load() }
+    }
 
-            Section(header: Text("Logo")) {
-                HStack(spacing: 12) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(.secondarySystemBackground))
-                            .frame(width: 72, height: 72)
+    private var businessInfoCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Business Info", systemImage: "building.2.crop.circle")
+                .font(.headline)
+            TextField("Business name", text: $businessName)
+                .textInputAutocapitalization(.words)
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+            TextField("Tagline (optional)", text: $tagline)
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+        }
+        .padding()
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground)))
+        .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
+    }
 
-                        if let img = pickedUIImage {
-                            Image(uiImage: img).resizable().scaledToFill()
-                                .frame(width: 72, height: 72).clipShape(RoundedRectangle(cornerRadius: 12))
-                        } else if let url = existingLogoURL {
-                            // Lightweight async image (iOS 15+)
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .empty:
-                                    ProgressView()
-                                case .success(let image):
-                                    image.resizable().scaledToFill()
-                                case .failure:
-                                    Image(systemName: "photo").font(.title2)
-                                @unknown default:
-                                    EmptyView()
-                                }
-                            }
-                            .frame(width: 72, height: 72)
+    private var logoCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Logo", systemImage: "photo")
+                .font(.headline)
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.secondarySystemBackground))
+                        .frame(width: 80, height: 80)
+                    if let img = pickedUIImage {
+                        Image(uiImage: img).resizable().scaledToFill()
+                            .frame(width: 80, height: 80)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
-                        } else {
-                            Image(systemName: "photo").font(.title2)
-                                .foregroundStyle(.secondary)
+                    } else if let url = existingLogoURL {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .empty: ProgressView()
+                            case .success(let image): image.resizable().scaledToFill()
+                            case .failure: Image(systemName: "photo")
+                            @unknown default: EmptyView()
+                            }
                         }
+                        .frame(width: 80, height: 80)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    } else {
+                        Image(systemName: "photo.on.rectangle")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
                     }
+                }
 
+                VStack(alignment: .leading, spacing: 6) {
                     PhotosPicker(selection: $pickerItem, matching: .images, photoLibrary: .shared()) {
-                        Label("Choose logo", systemImage: "photo")
+                        Label("Choose logo", systemImage: "plus.circle")
                     }
                     .onChange(of: pickerItem) { _, newItem in
                         Task { await loadPickedImage(from: newItem) }
@@ -75,33 +100,46 @@ struct BrandingView: View {
                         Button(role: .destructive) {
                             pickedUIImage = nil
                             pickedImageData = nil
-                        } label: { Label("Remove", systemImage: "trash") }
+                        } label: {
+                            Label("Remove", systemImage: "trash")
+                        }
                     }
                 }
             }
+        }
+        .padding()
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground)))
+        .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
+    }
 
-            Section(header: Text("Accent Color")) {
-                ColorPicker("Brand color", selection: $accentColor, supportsOpacity: false)
-            }
+    private var accentColorCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Accent Color", systemImage: "paintpalette.fill")
+                .font(.headline)
+            ColorPicker("Brand color", selection: $accentColor, supportsOpacity: false)
+                .padding(.horizontal)
+        }
+        .padding()
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground)))
+        .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
+    }
 
-            if let errorText {
-                Text(errorText)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
+    private var saveButton: some View {
+        Button(action: { Task { await save() } }) {
+            if isSaving {
+                ProgressView()
+            } else {
+                Text("Save Branding")
+                    .bold()
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(LinearGradient(colors: [.blue, .indigo], startPoint: .leading, endPoint: .trailing))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
             }
         }
-        .navigationTitle("Branding")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    Task { await save() }
-                } label: {
-                    if isSaving { ProgressView() } else { Text("Save").bold() }
-                }
-                .disabled(isSaving || businessName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .task { await load() }
+        .padding(.horizontal)
+        .disabled(isSaving || businessName.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
     // MARK: - Load/Save

@@ -5,9 +5,69 @@
 //  Created by Sergio Reyes on 10/7/25.
 //
 
+
 import SwiftUI
 import PDFKit
 import UIKit
+
+// MARK: - Lightweight Style
+private enum BrandStyle {
+    static let radius: CGFloat = 16
+    static let cardStroke = Color.black.opacity(0.08)
+    static let cardShadow = Color.black.opacity(0.06)
+    static let cardFill = Color(.secondarySystemBackground)
+    static let surface = Color(.systemBackground)
+
+    static let gradIris = LinearGradient(
+        colors: [Color(hex: "#5C6EFF"), Color(hex: "#8A6CFF")],
+        startPoint: .topLeading, endPoint: .bottomTrailing
+    )
+}
+
+private struct CardBackground: ViewModifier {
+    var radius: CGFloat = BrandStyle.radius
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(BrandStyle.cardFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .stroke(BrandStyle.cardStroke)
+            )
+            .shadow(color: BrandStyle.cardShadow, radius: 8, y: 3)
+    }
+}
+private extension View {
+    func cardStyle(radius: CGFloat = BrandStyle.radius) -> some View {
+        modifier(CardBackground(radius: radius))
+    }
+}
+
+private extension Color {
+    init(hex: String) {
+        var h = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+        if h.count == 3 { h = h.map { "\($0)\($0)" }.joined() }
+        var rgb: UInt64 = 0; Scanner(string: h).scanHexInt64(&rgb)
+        let r = Double((rgb >> 16) & 0xFF) / 255
+        let g = Double((rgb >> 8) & 0xFF) / 255
+        let b = Double(rgb & 0xFF) / 255
+        self = Color(red: r, green: g, blue: b)
+    }
+}
+
+private func AmountPill(_ value: String) -> some View {
+    Text(value)
+        .font(.title3.weight(.bold))
+        .monospacedDigit()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .foregroundStyle(.white)
+        .background(BrandStyle.gradIris)
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+}
 
 private struct SharePayload: Identifiable {
     let id = UUID()
@@ -55,12 +115,15 @@ struct InvoiceDetailView: View {
                                 }
                                 .foregroundStyle(.secondary)
 
-                                ForEach(d.line_items) { it in
+                                ForEach(Array(d.line_items.enumerated()), id: \.element.id) { idx, it in
                                     HStack {
                                         Text("\(it.qty)").frame(width: 40, alignment: .leading)
                                         Text(it.description).frame(maxWidth: .infinity, alignment: .leading)
                                         Text(currency(it.amount, d.currency)).frame(width: 90, alignment: .trailing)
                                     }
+                                    .padding(.vertical, 6)
+                                    .background(idx.isMultiple(of: 2) ? Color.primary.opacity(0.03) : .clear)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
                                 }
                             }
                         }
@@ -72,44 +135,12 @@ struct InvoiceDetailView: View {
                             }
                             TotalRow(label: "Total", value: currency(d.total ?? 0, d.currency), bold: true)
                         }
-
-                        // ===== Actions (tall card with centered, big buttons) =====
-                        SectionBox(title: "Actions") {
-                            VStack(spacing: 16) {
-                                Button {
-                                    Task { await openPDFPreview() }
-                                } label: {
-                                    Label("Open", systemImage: "doc.text")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.large)
-                                let total = d.total ?? 0
-                                Button {
-                                    Task { await send() }
-                                } label: {
-                                    Label("Send Invoice", systemImage: "paperplane")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.large)
-                                .disabled(total <= 0)
-
-                                if total <= 0 {
-                                    Text("Add items to enable sending.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.vertical, 8)
-                            Spacer(minLength: 0)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: 360)
                     }
                     .padding()
                 }
+                .scrollIndicators(.hidden)
+                .background(BrandStyle.surface)
+                .contentMargins(.bottom, 76)
                 .navigationTitle("Invoice \(d.number)")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -120,6 +151,15 @@ struct InvoiceDetailView: View {
                             Image(systemName: "arrow.down.circle")
                         }
                         .accessibilityLabel("Download PDF")
+                    }
+                }
+                .safeAreaInset(edge: .bottom) {
+                    if let d = detail {
+                        BottomActionBar(
+                            total: d.total ?? 0,
+                            onOpen: { Task { await openPDFPreview() } },
+                            onSend: { Task { await send() } }
+                        )
                     }
                 }
             } else {
@@ -156,20 +196,47 @@ struct InvoiceDetailView: View {
 
     @ViewBuilder
     private func header(_ d: InvoiceDetail) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                StatusChip(status: displayStatus(dStatus: d.status, sentAt: dSentAt(d)))
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    if let issuedOrCreated = (d.issued_at ?? d.created_at) {
-                        RowKV(k: "Date", v: shortDate(issuedOrCreated))
-                    }
-                    if let due = d.dueDate {
-                        RowKV(k: "Due", v: shortDate(due))
-                    }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
+                // Leading badge
+                ZStack {
+                    Circle().fill(Color.blue.opacity(0.12))
+                    Image(systemName: "doc.plaintext")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.blue)
                 }
+                .frame(width: 40, height: 40)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(d.client?.name ?? "—")
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(1)
+                    Text("Invoice \(d.number)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+
+                AmountPill(currency(d.total ?? 0, d.currency))
+            }
+
+            HStack(spacing: 14) {
+                if let issuedOrCreated = (d.issued_at ?? d.created_at) {
+                    Label(shortDate(issuedOrCreated), systemImage: "calendar")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if let due = d.dueDate {
+                    Label(shortDate(due), systemImage: "clock")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                StatusChip(status: displayStatus(dStatus: d.status, sentAt: dSentAt(d)))
             }
         }
+        .padding()
+        .cardStyle()
     }
 
     private func RowKV(k: String, v: String) -> some View {
@@ -188,18 +255,20 @@ struct InvoiceDetailView: View {
                 .foregroundStyle(.secondary)
             Text(value)
                 .font(bold ? .headline : .subheadline)
+                .monospacedDigit()
                 .frame(width: 120, alignment: .trailing)
         }
     }
 
     private func SectionBox<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.subheadline).bold()
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
             content()
         }
         .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .cardStyle()
     }
 
     // MARK: - Actions
@@ -429,4 +498,39 @@ private struct ActivitySheet: UIViewControllerRepresentable {
         return vc
     }
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+
+// Bottom action bar for invoice actions
+private struct BottomActionBar: View {
+    let total: Double
+    let onOpen: () -> Void
+    let onSend: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(action: onOpen) {
+                Label("Open PDF", systemImage: "doc.text")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+
+            Button(action: onSend) {
+                Label("Send", systemImage: "paperplane.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(total <= 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+        .overlay(
+            Rectangle()
+                .fill(.black.opacity(0.06))
+                .frame(height: 0.5),
+            alignment: .top
+        )
+    }
 }

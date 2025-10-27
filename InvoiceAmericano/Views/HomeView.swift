@@ -85,9 +85,14 @@ struct HomeView: View {
             NavigationStack {
                 RecentInvoicesSheet(
                     recentInvoices: recentInvoices,
-                    onClose: { showInvoicesSheet = false }
+                    onClose: { showInvoicesSheet = false },
+                    onOpenFullInvoices: {
+                        // dismiss then jump to the Invoices tab
+                        showInvoicesSheet = false
+                        onSelectTab?(1)
+                    }
                 )
-                // allow pushing by UUID from this sheet
+                // keep this so tapping rows in the sheet can still go to details
                 .navigationDestination(for: UUID.self) { invoiceId in
                     InvoiceDetailView(invoiceId: invoiceId)
                 }
@@ -99,9 +104,13 @@ struct HomeView: View {
             NavigationStack {
                 RecentActivitySheet(
                     recentActivity: recentActivity,
-                    onClose: { showActivitySheet = false }
+                    onClose: { showActivitySheet = false },
+                    onOpenFullActivity: {
+                        // dismiss then jump to the Activity tab
+                        showActivitySheet = false
+                        onSelectTab?(3)
+                    }
                 )
-                // allow pushing by UUID from this sheet
                 .navigationDestination(for: UUID.self) { invoiceId in
                     InvoiceDetailView(invoiceId: invoiceId)
                 }
@@ -307,10 +316,11 @@ struct HomeView: View {
                     NavigationLink(value: row.id) {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(row.number)
-                                    .font(.subheadline).bold()
                                 Text(row.client?.name ?? "—")
-                                    .font(.footnote).foregroundStyle(.secondary)
+                                    .font(.subheadline).bold()
+                                Text(row.number)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
                             }
                             Spacer()
                             VStack(alignment: .trailing, spacing: 4) {
@@ -529,6 +539,7 @@ private struct RecentInvoicesSheet: View {
 
     let recentInvoices: [InvoiceRow]
     var onClose: (() -> Void)? = nil
+    var onOpenFullInvoices: (() -> Void)? = nil
 
     @State private var filter: Filter = .all
     @State private var search = ""
@@ -636,10 +647,10 @@ private struct RecentInvoicesSheet: View {
                 }
             }
 
-            // Footer
+            // FooterR
             Section {
-                NavigationLink {
-                    InvoiceListView()
+                Button {
+                    onOpenFullInvoices?()   // dismiss sheet + switch tab
                 } label: {
                     Label("Open full invoices list", systemImage: "list.bullet.rectangle")
                 }
@@ -697,8 +708,9 @@ private struct InvoiceCardRow: View {
 
             // Title & client
             VStack(alignment: .leading, spacing: 2) {
-                Text(inv.number).font(.subheadline.weight(.semibold))
                 Text(inv.client?.name ?? "—")
+                    .font(.subheadline.weight(.semibold))
+                Text(inv.number)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -791,6 +803,7 @@ private struct RecentActivitySheet: View {
 
     let recentActivity: [ActivityJoined]
     var onClose: (() -> Void)? = nil
+    var onOpenFullActivity: (() -> Void)? = nil
 
     @State private var filter: Filter = .all
     @State private var search = ""
@@ -909,8 +922,8 @@ private struct RecentActivitySheet: View {
 
             // Footer
             Section {
-                NavigationLink {
-                    ActivityAllView()
+                Button {
+                    onOpenFullActivity?()   // dismiss sheet + switch tab
                 } label: {
                     Label("Open full activity feed", systemImage: "list.bullet.rectangle")
                 }

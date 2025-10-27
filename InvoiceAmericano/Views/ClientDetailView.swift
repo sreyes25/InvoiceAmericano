@@ -5,7 +5,6 @@
 //  Created by Sergio Reyes on 10/9/25.
 //
 
-
 import SwiftUI
 
 struct ClientDetailView: View {
@@ -25,80 +24,61 @@ struct ClientDetailView: View {
     @State private var invoices: [InvoiceRow] = []
 
     var body: some View {
-        List {
-            // Loading
-            if isLoading {
-                HStack { Spacer(); ProgressView(); Spacer() }
-            }
+        ScrollView {
+            VStack(spacing: 16) {
+                // Header card
+                ClientHeaderCard(client: client) {
+                    showEdit = true
+                }
 
-            // Error
-            if let e = errorMsg {
-                Text(e).foregroundStyle(.red)
-            }
+                // Address (shown only if at least one field is present)
+                if hasAnyAddress(client) {
+                    AddressCard(client: client)
+                }
 
-            // Client section
-            Section("Client") {
-                Text(client.name).font(.headline)
-                if let email = client.email, !email.isEmpty {
-                    Text(email).font(.subheadline).foregroundStyle(.secondary)
+                // Error (if any)
+                if let e = errorMsg {
+                    Text(e)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
                 }
-                if let phone = client.phone, !phone.isEmpty {
-                    Text(phone).font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-            // Address (shown only if at least one field is present)
-            Section("Address") {
-                if let a = client.address, !a.isEmpty {
-                    Text(a)
-                }
-                HStack {
-                    if let city = client.city, !city.isEmpty { Text(city) }
-                    if let st = client.state, !st.isEmpty {
-                        if (client.city?.isEmpty == false) { Text(",") }
-                        Text(st)
+
+                // Invoices list
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("Invoices", systemImage: "doc.plaintext")
+                            .font(.headline)
+                        Spacer()
                     }
-                    if let zip = client.zip, !zip.isEmpty {
-                        if (client.city?.isEmpty == false) || (client.state?.isEmpty == false) { Text("·") }
-                        Text(zip)
-                    }
-                }
-                .foregroundStyle(.secondary)
+                    .padding(.horizontal)
 
-                // Placeholder if no address fields are provided
-                if (client.address?.isEmpty ?? true) && (client.city?.isEmpty ?? true) && (client.state?.isEmpty ?? true) && (client.zip?.isEmpty ?? true) {
-                    Text("No address provided")
-                        .foregroundStyle(.secondary)
-                        .italic()
-                }
-            }
-
-            // Invoices for this client
-            Section("Invoices") {
-                if invoices.isEmpty, !isLoading, errorMsg == nil {
-                    Text("No invoices yet").foregroundStyle(.secondary)
-                } else {
-                    ForEach(invoices) { inv in
-                        NavigationLink(value: inv.id) {
-                            HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(spacing: 8) {
-                                        Text(inv.number).font(.subheadline).bold()
-                                        StatusChip(status: inv.status)
-                                    }
+                    if isLoading {
+                        ProgressView().frame(maxWidth: .infinity)
+                    } else if invoices.isEmpty && errorMsg == nil {
+                        Text("No invoices yet")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                    } else {
+                        VStack(spacing: 10) {
+                            ForEach(invoices) { inv in
+                                NavigationLink(value: inv.id) {
+                                    InvoiceRowCard(inv: inv)
                                 }
-                                Spacer()
-                                Text((inv.total ?? 0), format: .currency(code: "USD"))
-                                    .font(.subheadline)
-                                    .monospacedDigit()
+                                .buttonStyle(.plain)
                             }
-                            .padding(.vertical, 6)
-                            .contentShape(Rectangle())
                         }
+                        .padding(.horizontal)
                     }
                 }
+                .padding(.bottom, 8)
             }
+            .padding(.top, 12)
         }
+        .background(Color(.systemGroupedBackground))
         .navigationTitle(client.name)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Edit") { showEdit = true }
@@ -125,6 +105,7 @@ struct ClientDetailView: View {
     private func loadInvoices() async {
         do {
             isLoading = true
+            errorMsg = nil
             // If you have a specific API to fetch by client id, use that instead of .all + filter.
             let all = try await InvoiceService.fetchInvoices(status: .all)
             // Prefer matching by client id if available:
@@ -138,6 +119,191 @@ struct ClientDetailView: View {
             errorMsg = error.localizedDescription
             isLoading = false
         }
+    }
+
+    // MARK: - Helpers
+
+    private func hasAnyAddress(_ c: Client) -> Bool {
+        !(c.address?.isEmpty ?? true)
+        || !(c.city?.isEmpty ?? true)
+        || !(c.state?.isEmpty ?? true)
+        || !(c.zip?.isEmpty ?? true)
+    }
+}
+
+// MARK: - Header Card
+
+private struct ClientHeaderCard: View {
+    let client: Client
+    var onEdit: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 12) {
+                InitialsAvatar(name: client.name)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(client.name)
+                        .font(.title3.bold())
+                        .lineLimit(2)
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let email = client.email, !email.isEmpty {
+                            InfoChip(text: email, systemImage: "envelope")
+                        }
+                        if let phone = client.phone, !phone.isEmpty {
+                            InfoChip(text: phone, systemImage: "phone")
+                        }
+                    }
+                }
+                Spacer()
+                Button {
+                    onEdit()
+                } label: {
+                    Label("Edit", systemImage: "pencil")
+                        .labelStyle(.iconOnly)
+                        .padding(10)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(.black.opacity(0.06))
+        )
+        .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
+        .padding(.horizontal)
+    }
+}
+
+private struct InitialsAvatar: View {
+    let name: String
+
+    var body: some View {
+        let initials = initialsFromName(name)
+        ZStack {
+            Circle()
+                .fill(LinearGradient(colors: [.indigo.opacity(0.9), .blue], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 44, height: 44)
+            Text(initials)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(.white)
+        }
+        .accessibilityLabel(Text("Client avatar: \(initials)"))
+    }
+
+    private func initialsFromName(_ s: String) -> String {
+        let parts = s.split(separator: " ")
+        let first = parts.first?.prefix(1) ?? "?"
+        let last = parts.dropFirst().first?.prefix(1) ?? ""
+        return String(first + last)
+    }
+}
+
+private struct InfoChip: View {
+    let text: String
+    let systemImage: String
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage).font(.caption)
+            Text(text)
+                .font(.caption)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .background(
+            Capsule().fill(Color(.tertiarySystemFill))
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Address Card
+
+private struct AddressCard: View {
+    let client: Client
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Address", systemImage: "mappin.and.ellipse").font(.headline)
+            if let a = client.address, !a.isEmpty {
+                Text(a)
+            }
+            HStack(spacing: 6) {
+                if let city = client.city, !city.isEmpty { Text(city) }
+                if let st = client.state, !st.isEmpty {
+                    if (client.city?.isEmpty == false) { Text(",") }
+                    Text(st)
+                }
+                if let zip = client.zip, !zip.isEmpty {
+                    if (client.city?.isEmpty == false) || (client.state?.isEmpty == false) { Text("·") }
+                    Text(zip)
+                }
+            }
+            .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(.black.opacity(0.06))
+        )
+        .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
+        .padding(.horizontal)
+    }
+}
+
+// MARK: - Invoice Row Card
+
+private struct InvoiceRowCard: View {
+    let inv: InvoiceRow
+    var body: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 4) {
+                // Match list-style change you applied elsewhere: client name above, invoice below
+                Text(inv.client?.name ?? "—")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text(inv.number).font(.subheadline).bold()
+                    StatusChip(status: displayStatus(inv))
+                }
+            }
+            Spacer()
+            Text(currency(inv.total))
+                .font(.subheadline)
+                .monospacedDigit()
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.systemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(.black.opacity(0.05))
+        )
+        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+    }
+
+    private func currency(_ total: Double?) -> String {
+        let n = NumberFormatter()
+        n.numberStyle = .currency
+        n.currencyCode = "USD"
+        return n.string(from: NSNumber(value: total ?? 0)) ?? "$0.00"
+    }
+    private func displayStatus(_ inv: InvoiceRow) -> String {
+        if inv.status == "open", inv.sent_at != nil { return "sent" }
+        return inv.status
     }
 }
 

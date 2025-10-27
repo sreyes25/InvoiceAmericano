@@ -78,6 +78,9 @@ struct ActivityAllView: View {
         .navigationTitle("Activity")
         .task { await initialLoad() }                                // first load
         .onAppear { Task { await markReadAndBroadcastZero() } }      // clear badge when viewing
+        .navigationDestination(for: UUID.self) { invoiceId in
+            InvoiceDetailView(invoiceId: invoiceId)
+        }
     }
 
     // MARK: - Loading
@@ -208,18 +211,23 @@ struct ActivityAllView: View {
     @ViewBuilder
     private func activityRowCell(_ row: ActivityJoined) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: icon(for: row.event))
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 2) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [.indigo.opacity(0.2), .blue.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 36, height: 36)
+                Image(systemName: icon(for: row.event))
+                    .foregroundStyle(.blue)
+            }
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title(for: row))
-                    .font(.subheadline).bold()
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
                 Text(relativeTime(row.created_at))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
         }
-        .padding(.vertical, 4)
+        
     }
 
     // MARK: - Time helpers

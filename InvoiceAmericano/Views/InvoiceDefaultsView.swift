@@ -18,30 +18,119 @@ struct InvoiceDefaultsView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        Form {
-            Section(header: Text("Payment")) {
-                TextField("Default terms (e.g., Net 30)", text: $terms)
-                TextField("Default due days (e.g., 30)", text: $dueDays)
-                    .keyboardType(.numberPad)
-                TextField("Default tax rate (%)", text: $taxRate)
-                    .keyboardType(.decimalPad)
-            }
+        ScrollView {
+            VStack(spacing: 16) {
 
-            Section(header: Text("Invoice Footer")) {
-                TextField("Footer notes", text: $footerNotes, axis: .vertical)
-                    .lineLimit(3...6)
-            }
+                // ===== Payment Card =====
+                CardBox {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 10) {
+                            ZStack {
+                                Circle().fill(Color.blue.opacity(0.14))
+                                    .frame(width: 30, height: 30)
+                                Image(systemName: "creditcard.fill")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.blue)
+                            }
+                            Text("Payment")
+                                .font(.subheadline).bold()
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
 
-            if let errorText { Text(errorText).font(.footnote).foregroundStyle(.red) }
+                        FieldRow(label: "Terms") {
+                            TextField("e.g. Net 30", text: $terms)
+                                .textInputAutocapitalization(.words)
+                                .submitLabel(.done)
+                        }
+
+                        FieldRow(label: "Due Days") {
+                            TextField("30", text: $dueDays)
+                                .keyboardType(.numberPad)
+                                .submitLabel(.done)
+                        }
+
+                        FieldRow(label: "Tax Rate (%)") {
+                            TextField("0", text: $taxRate)
+                                .keyboardType(.decimalPad)
+                                .submitLabel(.done)
+                        }
+                    }
+                }
+
+                // ===== Footer Card =====
+                CardBox {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 10) {
+                            ZStack {
+                                Circle().fill(Color.orange.opacity(0.16))
+                                    .frame(width: 30, height: 30)
+                                Image(systemName: "text.bubble.fill")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(.orange)
+                            }
+                            Text("Invoice Footer")
+                                .font(.subheadline).bold()
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Footer Notes")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            TextField("Thanks for your business!", text: $footerNotes, axis: .vertical)
+                                .lineLimit(3...6)
+                        }
+                    }
+                }
+
+                if let errorText {
+                    Text(errorText)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 4)
+                }
+
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
         }
+        .background(Color(.systemGroupedBackground))
+        .scrollIndicators(.hidden)
         .navigationTitle("Invoice Defaults")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { Task { await save() } } label: {
-                    if isSaving { ProgressView() } else { Text("Save").bold() }
-                }
-                .disabled(isSaving)
+            // Keep a small action to dismiss if needed
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Close") { dismiss() }
             }
+        }
+        // Bottom sticky Save button
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 10) {
+                Button {
+                    Task { await save() }
+                } label: {
+                    if isSaving {
+                        ProgressView().frame(maxWidth: .infinity)
+                    } else {
+                        Label("Save Defaults", systemImage: "checkmark.seal.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(LargeGradientButtonStyle(gradient: [.blue, .indigo]))
+                .disabled(isSaving)
+
+                // Small helper text
+                Text("These defaults apply to new invoices. You can always edit per-invoice.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+            .background(.ultraThinMaterial)
         }
         .task { await load() }
     }
@@ -77,6 +166,58 @@ struct InvoiceDefaultsView: View {
         } catch {
             await MainActor.run { errorText = "Save failed: \(error.localizedDescription)" }
         }
+    }
+}
+
+private struct CardBox<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            content
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.black.opacity(0.05))
+        )
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
+    }
+}
+
+private struct FieldRow<Content: View>: View {
+    let label: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            content
+                .textFieldStyle(.roundedBorder)
+        }
+    }
+}
+
+private struct LargeGradientButtonStyle: ButtonStyle {
+    let gradient: [Color]
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(LinearGradient(colors: gradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+            )
+            .foregroundStyle(.white)
+            .opacity(configuration.isPressed ? 0.9 : 1)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
     }
 }
 

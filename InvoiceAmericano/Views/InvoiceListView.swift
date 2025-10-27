@@ -21,33 +21,19 @@ struct InvoiceListView: View {
     @State private var error: String?
     @State private var isSendingId: UUID? = nil
     @State private var sharePayload: SharePayload? = nil
-
-    var body: some View {
-        NavigationStack {
-            List {
-                statusPickerSection
-                invoicesSection
-            }
-            .navigationTitle("Invoices")
-            .toolbar { addButton }
-            .navigationDestination(for: UUID.self) { invoiceId in
-                InvoiceDetailView(invoiceId: invoiceId)
-            }
-            .sheet(isPresented: $showNew, content: {
-                newInvoiceSheet
-            })
-            .sheet(item: $sharePayload, content: { payload in
-                ActivitySheet(items: payload.items, onComplete: onShareCompleted)
-            })
-            .task { await load() }
-            .onChange(of: status) { _, _ in
-                Task { await load() }
-            }
-            .refreshable { await load() }
-        }
-    }
+    @State private var search: String = ""
 
     // MARK: - Sections
+
+    private var filteredInvoices: [InvoiceRow] {
+        guard !search.isEmpty else { return invoices }
+        let q = search.lowercased()
+        return invoices.filter { inv in
+            let number = inv.number.lowercased()
+            let client = (inv.client?.name ?? "").lowercased()
+            return number.contains(q) || client.contains(q)
+        }
+    }
 
     @ViewBuilder
     private var statusPickerSection: some View {
@@ -68,10 +54,16 @@ struct InvoiceListView: View {
                 ProgressView("Loading…")
             } else if let error {
                 Text(error).foregroundStyle(.red)
-            } else if invoices.isEmpty {
-                Text("No invoices").foregroundStyle(.secondary)
+            } else if filteredInvoices.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "doc.text.magnifyingglass").font(.title2)
+                    Text(search.isEmpty ? "No invoices" : "No results for \"\(search)\"")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 16)
             } else {
-                ForEach(invoices) { inv in
+                ForEach(filteredInvoices) { inv in
                     NavigationLink(value: inv.id) {
                         InvoiceRowCell(inv: inv)
                     }
@@ -85,7 +77,41 @@ struct InvoiceListView: View {
                         .tint(.blue)
                     }
                 }
+                .listRowSeparator(.hidden)
             }
+        }
+        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+        .listRowBackground(Color.clear)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                statusPickerSection
+                invoicesSection
+            }
+            .navigationTitle("Invoices")
+            .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search invoices or clients")
+            .toolbar { addButton }
+            .navigationDestination(for: UUID.self) { invoiceId in
+                InvoiceDetailView(invoiceId: invoiceId)
+            }
+            .sheet(isPresented: $showNew, content: {
+                newInvoiceSheet
+            })
+            .sheet(item: $sharePayload, content: { payload in
+                ActivitySheet(items: payload.items, onComplete: onShareCompleted)
+            })
+            .task { await load() }
+            .onChange(of: status) { _, _ in
+                Task { await load() }
+            }
+            .refreshable { await load() }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemGroupedBackground))
+            .scrollIndicators(.hidden)
+            .animation(.easeInOut, value: search)
         }
     }
 
@@ -218,25 +244,51 @@ private struct InvoiceRowCell: View {
     let inv: InvoiceRow
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
+            // Leading badge
+            ZStack {
+                Circle()
+                    .fill(Color.blue.opacity(0.12))
+                    .frame(width: 34, height: 34)
+                Image(systemName: "doc.text")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.blue)
+            }
+
+            // Title block
             VStack(alignment: .leading, spacing: 4) {
-                Text(inv.number).font(.subheadline).bold()
+                // Client first (bold)
                 Text(inv.client?.name ?? "—")
+                    .font(.subheadline).bold()
+                // Invoice number underneath, lighter
+                Text(inv.number)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
             Spacer()
-            VStack(alignment: .trailing, spacing: 4) {
+
+            // Amount + status
+            VStack(alignment: .trailing, spacing: 6) {
                 Text(currency(inv.total))
                     .font(.subheadline)
+                    .monospacedDigit()
                 StatusChip(status: displayStatus(inv))
             }
         }
-        .padding(.vertical, 6)
-        
-        
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.black.opacity(0.06))
+        )
+        .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
-    
+
     private func displayStatus(_ inv: InvoiceRow) -> String {
         if inv.status == "open", inv.sent_at != nil { return "sent" }
         return inv.status
@@ -246,6 +298,7 @@ private struct InvoiceRowCell: View {
         let n = NumberFormatter()
         n.numberStyle = .currency
         n.currencyCode = "USD"
+        n.usesGroupingSeparator = true
         return n.string(from: NSNumber(value: total ?? 0)) ?? "$0.00"
     }
 }
