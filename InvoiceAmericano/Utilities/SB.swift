@@ -16,7 +16,13 @@ final class SB {
         let url = URL(string: "https://pbhlynmgmgrzhynnrmna.supabase.co")!
         let anon = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBiaGx5bm1nbWdyemh5bm5ybW5hIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcwOTU5MTcsImV4cCI6MjA3MjY3MTkxN30.lu-ICiQNv6MTq1CD4mn21UANFwjVDO41jADzPDCzOuw"
 
-        client = SupabaseClient(supabaseURL: url, supabaseKey: anon)
+        client = SupabaseClient(
+            supabaseURL: url,
+            supabaseKey: anon,
+            options: SupabaseClientOptions(
+                auth: .init(flowType: .pkce)
+            )
+        )
 
     }
 }
@@ -29,18 +35,13 @@ private struct DeviceTokenInsert: Encodable {
 
 extension SB {
     func registerDeviceToken(_ token: String) async throws {
-        // Safely obtain user ID depending on your SDK version
-        let uid: UUID
-        if let user = client.auth.currentUser {
-            uid = user.id
-        } else if let sessionUser = try? await client.auth.session.user.id {
-            uid = sessionUser
-        } else {
+        // Only register if a user is authenticated
+        guard let user = client.auth.currentUser else {
             print("⚠️ No authenticated user; skipping device token registration")
             return
         }
 
-        let payload = DeviceTokenInsert(user_id: uid, token: token, platform: "ios")
+        let payload = DeviceTokenInsert(user_id: user.id, token: token, platform: "ios")
 
         _ = try await client
             .from("device_tokens")

@@ -26,12 +26,8 @@ struct InvoiceAmericanoApp: App {
             // Handle email confirmation deep-link
             .onOpenURL { url in
                 Task {
-                    do {
-                        try await AuthService.handleDeepLink(url)
-                        isAuthed = (AuthService.currentUserIDFast() != nil)
-                    } catch {
-                        print("Deep link error:", error)
-                    }
+                    await AuthService.handleDeepLink(url)
+                    isAuthed = (AuthService.currentUserIDFast() != nil)
                 }
             }
             // Flip UI when sign-in/sign-out happens
