@@ -21,6 +21,7 @@ struct InvoiceListView: View {
     @State private var error: String?
     @State private var isSendingId: UUID? = nil
     @State private var sharePayload: SharePayload? = nil
+    @State private var pushInvoiceId: UUID? = nil
     @State private var search: String = ""
 
     // MARK: - Sections
@@ -64,7 +65,9 @@ struct InvoiceListView: View {
                 .padding(.vertical, 16)
             } else {
                 ForEach(filteredInvoices) { inv in
-                    NavigationLink(value: inv.id) {
+                    Button {
+                        pushInvoiceId = inv.id
+                    } label: {
                         InvoiceRowCell(inv: inv)
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -76,26 +79,42 @@ struct InvoiceListView: View {
                         }
                         .tint(.blue)
                     }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
                 }
-                .listRowSeparator(.hidden)
             }
         }
-        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-        .listRowBackground(Color.clear)
     }
 
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Search invoices or clients", text: $search)
+                            .textInputAutocapitalization(.words)
+                    }
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                }
+                .listRowBackground(Color.clear)
                 statusPickerSection
                 invoicesSection
             }
             .navigationTitle("Invoices")
-            .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search invoices or clients")
             .toolbar { addButton }
-            .navigationDestination(for: UUID.self) { invoiceId in
+            .navigationDestination(item: $pushInvoiceId) { invoiceId in
                 InvoiceDetailView(invoiceId: invoiceId)
             }
+            .buttonStyle(.plain)
             .sheet(isPresented: $showNew, content: {
                 newInvoiceSheet
             })
@@ -107,7 +126,8 @@ struct InvoiceListView: View {
                 Task { await load() }
             }
             .refreshable { await load() }
-            .listStyle(.insetGrouped)
+            .listStyle(.plain)
+            .environment(\.defaultMinListRowHeight, 0)
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .scrollIndicators(.hidden)
@@ -245,18 +265,30 @@ private struct InvoiceRowCell: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Leading badge
+            // Avatar / initials bubble
             ZStack {
                 Circle()
-                    .fill(Color.blue.opacity(0.12))
-                    .frame(width: 34, height: 34)
-                Image(systemName: "doc.text")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.blue)
+                    .fill(LinearGradient(colors: [Color.red.opacity(0.30), Color.orange.opacity(0.28)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .overlay(
+                        Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: 0.5)
+                    )
+                // Show initials; if not available, show a doc icon as fallback
+                let text = initials(from: inv.client?.name ?? "—")
+                if text == "—" || text.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                } else {
+                    Text(text)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.white)
+                }
             }
+            .frame(width: 44, height: 44)
+            .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
 
             // Title block
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 // Client first (bold)
                 Text(inv.client?.name ?? "—")
                     .font(.subheadline).bold()
@@ -275,8 +307,11 @@ private struct InvoiceRowCell: View {
                     .monospacedDigit()
                 StatusChip(status: displayStatus(inv))
             }
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
-        .padding(12)
+        .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
@@ -300,6 +335,13 @@ private struct InvoiceRowCell: View {
         n.currencyCode = "USD"
         n.usesGroupingSeparator = true
         return n.string(from: NSNumber(value: total ?? 0)) ?? "$0.00"
+    }
+
+    private func initials(from name: String) -> String {
+        let parts = name.split(separator: " ")
+        let first = parts.first?.first.map(String.init) ?? "?"
+        let second = parts.dropFirst().first?.first.map(String.init) ?? ""
+        return (first + second).uppercased()
     }
 }
 
