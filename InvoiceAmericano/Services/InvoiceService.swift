@@ -8,6 +8,37 @@
 import Foundation
 import Supabase
 
+// MARK: - Brand name helper (source of truth: profiles.display_name)
+enum BrandNameProvider {
+    /// Fetches the current user's business/brand display name.
+    /// Falls back to a safe default if not found.
+    static func currentBrandName() async -> String {
+        let client = SupabaseManager.shared.client
+        // Get current user id
+        guard let uid = client.auth.currentSession?.user.id else {
+            return "Your Business"
+        }
+
+        // Query profiles.display_name (single source of truth)
+        struct Row: Decodable { let display_name: String? }
+        do {
+            let row: Row = try await client
+                .from("profiles")
+                .select("display_name")
+                .eq("id", value: uid.uuidString)
+                .single()
+                .execute()
+                .value
+
+            let name = (row.display_name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? "Your Business" : name
+        } catch {
+            // If anything fails, return a safe default so PDF/headers still render
+            return "Your Business"
+        }
+    }
+}
+
 // MARK: - Payload/DTO helpers
 
 private struct InsertedInvoiceID: Decodable { let id: UUID }
@@ -327,3 +358,5 @@ enum InvoiceService {
         return detail
     }
 }
+
+

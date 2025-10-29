@@ -3,11 +3,12 @@
 //  InvoiceAmericano
 //
 //  Created by Sergio Reyes on 10/21/25.
-
+//
 
 import SwiftUI
 import PhotosUI
 import Supabase
+import Foundation
 
 struct BrandingView: View {
     /// Notify parent (e.g., AccountView) when the DBA/business name changes
@@ -146,31 +147,40 @@ struct BrandingView: View {
         .disabled(isSaving || businessName.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
-    // MARK: - Load/Save
+    // MARK: - Load/Save (direct Supabase, no BrandingService dependency)
 
     private func load() async {
         do {
-            // 1) Load branding settings (logo, color, optional tagline) from your app's settings table
-            let s = try await BrandingService.loadBranding()
-            await MainActor.run {
-                businessName = s?.businessName ?? businessName
-                tagline = s?.tagline ?? ""
-                accentColor = Color(hex: s?.accentHex ?? "#1E90FF") ?? .blue
-                if let urlString = s?.logoPublicURL, let url = URL(string: urlString) {
-                    existingLogoURL = url
-                } else {
-                    existingLogoURL = nil
-                }
-            }
-
-            // 2) Load the single source of truth for the display name (profiles.display_name)
             let client = SupabaseManager.shared.client
             let session = try await client.auth.session
             let uid = session.user.id
 
-            struct ProfileRow: Decodable { let display_name: String? }
+            // 1) Try branding_settings (may not exist yet)
+            struct BrandingRow: Decodable {
+                let business_name: String?
+                let tagline: String?
+                let accent_hex: String?
+                let logo_public_url: String?
+            }
 
-            let row: ProfileRow = try await client
+            var branding: BrandingRow? = nil
+            do {
+                branding = try await client
+                    .from("branding_settings")
+                    .select("business_name,tagline,accent_hex,logo_public_url")
+                    .eq("user_id", value: uid.uuidString)
+                    .limit(1)
+                    .single()
+                    .execute()
+                    .value
+            } catch {
+                // No row yet is fine; fall back to profiles
+                branding = nil
+            }
+
+            // 2) Load the single source of truth for the display name (profiles.display_name)
+            struct ProfileRow: Decodable { let display_name: String? }
+            let profile: ProfileRow = try await client
                 .from("profiles")
                 .select("display_name")
                 .eq("id", value: uid.uuidString)
@@ -178,8 +188,18 @@ struct BrandingView: View {
                 .execute()
                 .value
 
-            if let dba = row.display_name, !dba.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                await MainActor.run { self.businessName = dba }
+            await MainActor.run {
+                if let dba = profile.display_name, !dba.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    self.businessName = dba
+                } else if let name = branding?.business_name {
+                    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        self.businessName = trimmed
+                    }
+                }
+                self.tagline = branding?.tagline ?? ""
+                if let hex = branding?.accent_hex, let c = Color(hex: hex) { self.accentColor = c }
+                if let urlStr = branding?.logo_public_url, let u = URL(string: urlStr) { self.existingLogoURL = u }
             }
         } catch {
             await MainActor.run { errorText = "Failed to load branding. \(error.localizedDescription)" }
@@ -192,38 +212,46 @@ struct BrandingView: View {
         var step = "start"
 
         do {
+            let client = SupabaseManager.shared.client
+            let session = try await client.auth.session
+            let uid = session.user.id.uuidString
+
             var logoPublicURL: String? = nil
 
             // If user picked a new image, upload it
             if let ui = pickedUIImage {
                 step = "uploadLogo"
-                print("[Branding] step=\(step) – preparing image upload")
                 let resized = ui.ia_resized(maxDimension: 512)
                 guard let data = resized.pngData() else { throw SaveError.couldNotEncodePNG }
                 logoPublicURL = try await SupabaseStorageService.uploadBrandingLogo(data: data)
-                print("[Branding] step=\(step) – storage OK, url=", logoPublicURL ?? "nil")
             } else if let url = existingLogoURL {
                 logoPublicURL = url.absoluteString
-                print("[Branding] step=reuseLogo – reusing existing url=", logoPublicURL ?? "nil")
             }
 
             let accentHex = accentColor.ia_hexString()
 
+            // 1) Upsert into branding_settings
             step = "upsertSettings"
-            print("[Branding] step=\(step) – name=\(businessName), hasLogo=\(logoPublicURL != nil), accent=\(accentHex)")
-            try await BrandingService.upsertBranding(
-                businessName: businessName,
-                tagline: tagline,
-                accentHex: accentHex,
-                logoPublicURL: logoPublicURL
+            struct UpsertPayload: Encodable {
+                let user_id: String
+                let business_name: String
+                let tagline: String?
+                let accent_hex: String?
+                let logo_public_url: String?
+            }
+            let payload = UpsertPayload(
+                user_id: uid,
+                business_name: businessName,
+                tagline: (tagline.trimmingCharacters(in: .whitespaces).isEmpty ? nil : tagline),
+                accent_hex: accentHex,
+                logo_public_url: ((logoPublicURL?.isEmpty ?? true) ? nil : logoPublicURL)
             )
-            print("[Branding] step=settings upsert OK")
+            _ = try await client
+                .from("branding_settings")
+                .upsert(payload, onConflict: "user_id")
+                .execute()
 
             // 2) Update single source of truth: profiles.display_name
-            let client = SupabaseManager.shared.client
-            let session = try await client.auth.session
-            let uid = session.user.id.uuidString
-
             struct UpdatePayload: Encodable { let display_name: String }
             _ = try await client
                 .from("profiles")
@@ -235,14 +263,14 @@ struct BrandingView: View {
             let attrs = UserAttributes(data: ["full_name": AnyJSON.string(businessName)])
             _ = try await client.auth.update(user: attrs)
 
-            // 4) Notify parent & dismiss
+            // 4) Announce & dismiss
             await MainActor.run {
+                NotificationCenter.default.post(name: .brandingDidChange, object: nil)
                 onBrandNameChanged?(businessName)
                 dismiss()
             }
         } catch {
             let message = "Save failed at \(step). \(error.localizedDescription)"
-            print("[Branding] ERROR –", message)
             await MainActor.run { errorText = message }
         }
     }
@@ -307,4 +335,11 @@ private extension Color {
         return "#1E90FF"
         #endif
     }
+}
+
+
+// MARK: - Notification.Name extension
+
+extension Notification.Name {
+    static let brandingDidChange = Notification.Name("BrandingDidChange")
 }

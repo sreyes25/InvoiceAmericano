@@ -42,11 +42,17 @@ enum PDFGenerator {
 
     /// Renders an invoice PDF. If `includeBranding` is true, we fetch name/tagline/accent/logo from BrandingService.
     static func makeInvoicePDF(detail: InvoiceDetail, includeBranding: Bool = true) async throws -> URL {
-        let branding = includeBranding ? (try? await BrandingService.loadBranding()) : nil
+        // Resolve business name from profiles.display_name so first PDF reflects onboarding immediately
+        let businessName: String = await fetchBusinessName()
+        var branding: Any? = nil
+        if includeBranding {
+            // We may still read optional theming from BrandingService (tagline/accent/logo),
+            // but the name itself comes from profiles.display_name.
+            let loaded = try? await BrandingService.loadBranding()
+            branding = loaded
+        }
 
-        // Extract theming from branding (work with several possible key names).
-        let businessName = (readString(branding, keys: ["businessName","name","business_name"])?.trimmedNonEmpty)
-            ?? "Your Business"
+        // Extract theming from branding (tagline/accent come from branding table/json)
         let tagline = readString(branding, keys: ["tagline","businessTagline","tag_line"])?.trimmedNonEmpty
         let accentHexStr = readString(branding, keys: ["accentHex","accent_hex","accentColor","accent"])?.trimmedNonEmpty
         let accent = accentHexStr.flatMap(hexToUIColor) ?? UIColor.systemBlue
@@ -66,6 +72,27 @@ enum PDFGenerator {
             logo: logo,
             footerText: footerText
         )
+    }
+
+    /// Fetch the current user's business name from profiles.display_name (single source of truth)
+    private static func fetchBusinessName() async -> String {
+        let client = SupabaseManager.shared.client
+        if let session = try? await client.auth.session {
+            let uid = session.user.id.uuidString
+            struct Row: Decodable { let display_name: String? }
+            if let row: Row = try? await client
+                .from("profiles")
+                .select("display_name")
+                .eq("id", value: uid)
+                .single()
+                .execute()
+                .value,
+               let name = row.display_name?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !name.isEmpty {
+                return name
+            }
+        }
+        return "Your Business"
     }
 
     // MARK: - Sync API w/ simple defaults (back-compat)

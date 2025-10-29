@@ -2,97 +2,92 @@
 //  BrandingService.swift
 //  InvoiceAmericano
 //
-//  Created by Sergio Reyes on 10/21/25.
+//  Created by Sergio Reyes on 10/29/25.
 //
 
 import Foundation
 import Supabase
-
-struct BrandingSettings: Codable {
-    let businessName: String
-    let tagline: String?
-    let accentHex: String
-    let logoPublicURL: String?
-}
+import PostgREST
 
 enum BrandingService {
-    // Table: settings (per user)
-    // Columns (suggested):
-    // user_id uuid (pk/fk auth.users.id)
-    // business_name text
-    // tagline text
-    // accent_hex text
-    // logo_public_url text
-    //
-    // RLS: user_id = auth.uid()
-    // Policy: SELECT/UPSERT by owner
+    // Simple in-memory cache
+    private static var cached: Branding?
 
-    static func loadBranding() async throws -> BrandingSettings? {
+    struct Branding: Decodable {
+        let businessName: String
+        let tagline: String?
+        let accentHex: String?
+        let logoPublicURL: String?
+    }
+
+    static func invalidateCache() { cached = nil }
+
+    static var cachedBusinessName: String? { cached?.businessName }
+
+    static func setCachedBusinessName(_ s: String) {
+        if let c = cached {
+            cached = Branding(businessName: s,
+                              tagline: c.tagline,
+                              accentHex: c.accentHex,
+                              logoPublicURL: c.logoPublicURL)
+        } else {
+            cached = Branding(businessName: s, tagline: nil, accentHex: nil, logoPublicURL: nil)
+        }
+    }
+
+    /// Load branding: prefer profiles.display_name, fallback to branding_settings, else "Your Business".
+    static func loadBranding() async throws -> Branding? {
+        if let c = cached { return c }
+
         let client = SupabaseManager.shared.client
-        let session = try? await client.auth.session
-        guard let uid = session?.user.id.uuidString else { return nil }
+        let session = try await client.auth.session
+        let uid = session.user.id.uuidString
 
-        struct Row: Decodable {
+        // 1) profiles.display_name
+        struct ProfileRow: Decodable { let display_name: String? }
+        let profile: ProfileRow = try await client
+            .from("profiles")
+            .select("display_name")
+            .eq("id", value: uid)
+            .single()
+            .execute()
+            .value
+
+        // 2) branding_settings (fetch as array, then .first)
+        struct BrandingRow: Decodable {
             let business_name: String?
             let tagline: String?
             let accent_hex: String?
             let logo_public_url: String?
         }
 
-        let rows: [Row] = try await client
-            .from("settings")
-            .select()
+        let rows: [BrandingRow] = try await client
+            .from("branding_settings")
+            .select("business_name,tagline,accent_hex,logo_public_url")
             .eq("user_id", value: uid)
             .limit(1)
             .execute()
             .value
 
-        guard let r = rows.first else { return nil }
+        let row = rows.first
 
-        return BrandingSettings(
-            businessName: r.business_name ?? "",
-            tagline: r.tagline,
-            accentHex: r.accent_hex ?? "#1E90FF",
-            logoPublicURL: r.logo_public_url
-        )
-    }
-
-    static func upsertBranding(
-        businessName: String,
-        tagline: String?,
-        accentHex: String,
-        logoPublicURL: String?
-    ) async throws {
-        let client = SupabaseManager.shared.client
-        let session = try? await client.auth.session
-        guard let uid = session?.user.id.uuidString else { throw NSError(domain: "auth", code: 401) }
-
-        struct UpsertRow: Encodable {
-            let user_id: String
-            let business_name: String
-            let tagline: String?
-            let accent_hex: String
-            let logo_public_url: String?
+        func cleaned(_ s: String?) -> String? {
+            let t = (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return t.isEmpty ? nil : t
         }
 
-        let payload = UpsertRow(
-            user_id: uid,
-            business_name: businessName,
-            tagline: tagline?.nilIfBlank,
-            accent_hex: accentHex,
-            logo_public_url: logoPublicURL?.nilIfBlank
+        let resolvedName =
+            cleaned(profile.display_name)
+            ?? cleaned(row?.business_name)
+            ?? "Your Business"
+
+        let result = Branding(
+            businessName: resolvedName,
+            tagline: row?.tagline,
+            accentHex: row?.accent_hex,
+            logoPublicURL: row?.logo_public_url
         )
-
-        _ = try await client
-            .from("settings")
-            .upsert(payload, onConflict: "user_id")
-            .execute()
-    }
-}
-
-private extension String {
-    var nilIfBlank: String? {
-        let t = trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? nil : t
+        cached = result
+        return result
     }
 }
