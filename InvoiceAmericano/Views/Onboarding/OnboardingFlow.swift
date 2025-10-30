@@ -8,6 +8,13 @@
 import SwiftUI
 import UserNotifications
 import Supabase
+import SafariServices
+
+struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> SFSafariViewController { .init(url: url) }
+    func updateUIViewController(_ vc: SFSafariViewController, context: Context) {}
+}
 
 // MARK: - Coordinator
 
@@ -73,6 +80,14 @@ struct OnboardingFlow: View {
             .padding(.horizontal, 16)
             .navigationTitle(title(for: step))
             .navigationBarTitleDisplayMode(.large)
+            .onOpenURL { url in
+                // invoiceamericano://stripe/return or /refresh
+                guard url.host == "stripe" else { return }
+                // Minimal: mark connected and continue
+                stripeConnected = true
+                // Then advance if we are on the Stripe step
+                if step == .stripeConnect { step = .done }
+            }
         }
         .overlay(alignment: .bottom) {
             if let err = errorText {
@@ -319,6 +334,14 @@ private struct StripeConnectStep: View {
     @Binding var stripeConnected: Bool
     var onSkipOrConnected: () -> Void
 
+    @State private var isLoading = false
+    @State private var error: String?
+    @State private var safariURL: URL?
+    @State private var showSafari = false
+
+    // 👉 Put your real invoke URL here
+    private let functionURL = URL(string: "https://pbhlynmgmgrzhynnrmna.supabase.co/functions/v1/create_connect_link")!
+
     var body: some View {
         VStack(spacing: 16) {
             Text("Get paid with Stripe").font(.title3).bold()
@@ -327,24 +350,56 @@ private struct StripeConnectStep: View {
 
             Spacer()
 
+            if let error { Text(error).foregroundStyle(.red) }
+
             Button {
-                // TODO: open your Connect onboarding URL (Edge Function or server returns link)
-                // Example:
-                // if let url = URL(string: connectURL) { UIApplication.shared.open(url) }
-                // For now, simulate connected:
-                stripeConnected = true
-                onSkipOrConnected()
+                Task { await startOnboarding() }
             } label: {
-                Text("Connect Stripe").bold().frame(maxWidth: .infinity).padding(.vertical, 14)
+                Text(isLoading ? "Loading…" : "Connect Stripe")
+                    .bold().frame(maxWidth: .infinity).padding(.vertical, 14)
             }
             .buttonStyle(.borderedProminent)
+            .disabled(isLoading)
 
-            Button("Do this later") {
-                onSkipOrConnected()
-            }
-            .padding(.top, 8)
+            Button("Do this later") { onSkipOrConnected() }
+                .padding(.top, 8)
         }
         .padding(.top, 8)
+        .sheet(isPresented: $showSafari) {
+            if let url = safariURL { SafariView(url: url) }
+        }
+    }
+
+    private func startOnboarding() async {
+        await MainActor.run { isLoading = true; error = nil }
+        defer { Task { await MainActor.run { isLoading = false } } }
+
+        do {
+            // Grab a fresh user token
+            let client = SB.shared.client
+            let session = try await client.auth.session
+            let token = session.accessToken
+
+            var req = URLRequest(url: functionURL)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
+                let body = String(data: data, encoding: .utf8) ?? "Unknown error"
+                throw NSError(domain: "StripeConnect", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: body])
+            }
+
+            struct ConnectResp: Decodable { let url: String }
+            let decoded = try JSONDecoder().decode(ConnectResp.self, from: data)
+            guard let url = URL(string: decoded.url) else { throw URLError(.badURL) }
+
+            await MainActor.run { safariURL = url; showSafari = true }
+        } catch {
+            await MainActor.run { self.error = error.localizedDescription }
+        }
     }
 }
 
@@ -366,4 +421,3 @@ private struct DoneStep: View {
         .padding(.top, 8)
     }
 }
-
