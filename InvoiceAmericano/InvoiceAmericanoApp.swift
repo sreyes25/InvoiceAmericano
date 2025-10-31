@@ -18,7 +18,7 @@ struct InvoiceAmericanoApp: App {
 
     private func recomputeOnboardingFlag() async {
         do {
-            let client = SB.shared.client
+            let client = SupabaseManager.shared.client
             let session = try await client.auth.session
             let uid = session.user.id
 

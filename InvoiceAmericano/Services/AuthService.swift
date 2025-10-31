@@ -17,7 +17,7 @@ enum AuthService {
 
     // MARK: - Email/Password
     static func signUp(email: String, password: String) async throws {
-        _ = try await SB.shared.client.auth.signUp(
+        _ = try await SupabaseManager.shared.client.auth.signUp(
             email: email,
             password: password,
             redirectTo: redirectURL
@@ -26,7 +26,7 @@ enum AuthService {
     }
 
     static func signIn(email: String, password: String) async throws {
-        _ = try await SB.shared.client.auth.signIn(
+        _ = try await SupabaseManager.shared.client.auth.signIn(
             email: email,
             password: password
         )
@@ -34,14 +34,14 @@ enum AuthService {
     }
 
     static func signOut() async throws {
-        try await SB.shared.client.auth.signOut()
+        try await SupabaseManager.shared.client.auth.signOut()
         NotificationCenter.default.post(name: .authDidChange, object: nil)
     }
 
     // MARK: - Sign in with Apple (via Supabase OAuth)
     /// Presents Apple's native sheet and returns via the app's custom URL scheme.
     static func signInWithApple() async throws {
-        try await SB.shared.client.auth.signInWithOAuth(
+        try await SupabaseManager.shared.client.auth.signInWithOAuth(
             provider: .apple,
             redirectTo: redirectURL
         )
@@ -54,7 +54,7 @@ enum AuthService {
     @discardableResult
     static func handleOpenURL(_ url: URL) async -> Bool {
         do {
-            try await SB.shared.client.auth.session(from: url)
+            try await SupabaseManager.shared.client.auth.session(from: url)
             NotificationCenter.default.post(name: .authDidChange, object: nil)
             return true
         } catch {
@@ -71,17 +71,17 @@ enum AuthService {
     // MARK: - Session helpers
     /// Preferred: UUID typed user id if you need it.
     static func currentUserID() -> UUID? {
-        SB.shared.client.auth.currentSession?.user.id
+        SupabaseManager.shared.client.auth.currentSession?.user.id
     }
 
     /// Legacy helper kept for compatibility with any existing call sites.
     static func currentUserIDFast() -> String? {
-        SB.shared.client.auth.currentSession?.user.id.uuidString
+        SupabaseManager.shared.client.auth.currentSession?.user.id.uuidString
     }
 
     /// Optional: Good to call on app launch to validate/refresh local session.
     static func refreshSession() async throws {
-        try await SB.shared.client.auth.refreshSession()
+        try await SupabaseManager.shared.client.auth.refreshSession()
     }
 }
 

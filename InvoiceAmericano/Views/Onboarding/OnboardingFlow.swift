@@ -111,7 +111,7 @@ struct OnboardingFlow: View {
     private func persistAllAndClose() async {
         guard !isSaving else { return }
         await MainActor.run { isSaving = true; errorText = nil }
-        let client = SB.shared.client
+        let client = SupabaseManager.shared.client
 
         do {
             let session = try await client.auth.session
@@ -376,7 +376,7 @@ private struct StripeConnectStep: View {
 
         do {
             // Grab a fresh user token
-            let client = SB.shared.client
+            let client = SupabaseManager.shared.client
             let session = try await client.auth.session
             let token = session.accessToken
 

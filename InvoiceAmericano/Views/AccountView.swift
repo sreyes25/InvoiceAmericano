@@ -8,6 +8,7 @@
 import SwiftUI
 import Foundation
 import Supabase
+import Auth
 
 /// ✅ Single source of truth for the account display name:
 /// We use the **DBA / Business Name** collected during onboarding,
@@ -27,6 +28,10 @@ struct AccountView: View {
     @State private var totalInvoices: Int = 0
     @State private var paidInvoices: Int = 0
     @State private var outstanding: Double = 0
+
+    // Stripe Connect
+    @State private var stripeStatus: StripeStatus? = nil
+    @State private var stripeLoading: Bool = false
 
     // MARK: - UI Palettes
     private let blueGrad:  [Color] = [Color.blue.opacity(0.6),  Color.indigo.opacity(0.6)]
@@ -60,6 +65,7 @@ struct AccountView: View {
             VStack(spacing: 20) {
                 header
                 summaryCards
+                paymentsCard
                 actionCards
                 settingsList
                 signOutButton
@@ -87,6 +93,7 @@ struct AccountView: View {
 
             let enabled = await ProfileService.loadNotificationsEnabled()
             await MainActor.run { self.notificationsEnabled = enabled }
+            await refreshStripeStatus()
         }
         .onAppear {
             // refresh DBA when coming back from Branding or Profile edits
@@ -203,6 +210,172 @@ struct AccountView: View {
                 self.uid = ""
                 self.email = "you@example.com"
             }
+        }
+    }
+    // MARK: - Stripe Payments Card
+    private var paymentsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Payments with Stripe")
+                    .font(.headline)
+                Spacer()
+                Text(stripeStateLabel)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(stripeStateColor)
+            }
+
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                Task { await onStripePrimaryTap() }
+            } label: {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue.opacity(0.14))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: stripePrimaryIcon)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.blue)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(stripePrimaryTitle)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+                        Text(stripeSubtitle)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    Spacer()
+                    if stripeLoading {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(.black.opacity(0.05))
+                )
+                .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
+            }
+            .buttonStyle(.plain)
+
+            if (stripeStatus?.connected ?? false) == true {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    Task { await IA_openStripeManage() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "gearshape.2.fill")
+                        Text("Manage in Stripe")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.black.opacity(0.05))
+        )
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 3)
+    }
+
+    // MARK: - Stripe computed labels
+    private var stripePrimaryTitle: String {
+        let connected = stripeStatus?.connected ?? false
+        return connected ? "Stripe Connected" : "Connect with Stripe"
+    }
+    private var stripePrimaryIcon: String {
+        let connected = stripeStatus?.connected ?? false
+        return connected ? "checkmark.seal.fill" : "creditcard.fill"
+    }
+    private var stripeSubtitle: String {
+        if let s = stripeStatus {
+            if s.connected == true {
+                let ready = (s.details_submitted == true && s.charges_enabled == true && s.payouts_enabled == true)
+                return ready ? "Ready: charges & payouts enabled" : "Connected — finish verification to enable payouts"
+            } else {
+                return "Accept payments from your invoices"
+            }
+        }
+        return "Accept payments from your invoices"
+    }
+    private var stripeStateLabel: String {
+        if let s = stripeStatus {
+            if !s.connected { return "Not connected" }
+            let ready = (s.details_submitted == true && s.charges_enabled == true && s.payouts_enabled == true)
+            return ready ? "Active" : "Needs setup"
+        }
+        return "Checking…"
+    }
+    private var stripeStateColor: Color {
+        if let s = stripeStatus {
+            if !s.connected { return .red }
+            let ready = (s.details_submitted == true && s.charges_enabled == true && s.payouts_enabled == true)
+            return ready ? .green : .orange
+        }
+        return .secondary
+    }
+
+    // MARK: - Stripe actions/helpers
+    private func onStripePrimaryTap() async {
+        if stripeStatus?.connected == true {
+            await IA_openStripeManage()
+        } else {
+            await openStripeOnboarding()
+        }
+    }
+
+    private func refreshStripeStatus() async {
+        await MainActor.run { stripeLoading = true }
+        let status = await IA_fetchStripeStatus()
+        await MainActor.run {
+            self.stripeStatus = status
+            self.stripeLoading = false
+        }
+    }
+
+    private func openStripeOnboarding() async {
+        await MainActor.run { stripeLoading = true }
+        defer { Task { await MainActor.run { stripeLoading = false } } }
+
+        let client = SupabaseManager.shared.client
+        do {
+            let session = try await client.auth.session
+            guard let url = URL(string: "https://pbhlynmgmgrzhynnrmna.supabase.co/functions/v1/create_connect_link") else { return }
+
+            var req = URLRequest(url: url)
+            req.httpMethod = "GET"
+            req.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else { return }
+            if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+               let link = dict["url"],
+               let linkURL = URL(string: link) {
+                await UIApplication.shared.open(linkURL)
+            }
+        } catch {
+            // silent for now
         }
     }
 
@@ -620,6 +793,11 @@ struct AccountDetailsView: View {
             _ = try await client.auth.update(user: attrs)
 
             await MainActor.run {
+                // Invalidate any cached branding and broadcast change so other screens (PDF, headers) update
+                BrandingService.invalidateCache()
+                NotificationCenter.default.post(name: .brandingDidChange, object: newName)
+
+                // Update local UI state
                 currentName = newName
                 onNameChanged(newName)    // notify parent so header updates
                 saving = false

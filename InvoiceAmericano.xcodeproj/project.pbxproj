@@ -39,7 +39,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		FD275F7E2E8F3FBA0034D773 /* Exceptions for "InvoiceAmericano" folder in "InvoiceAmericano" target */ = {
+		FDC01E2D2EB4875B00CDDFEC /* Exceptions for "InvoiceAmericano" folder in "InvoiceAmericano" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -52,7 +52,7 @@
 		FD00AAF42E7D157100D6874A /* InvoiceAmericano */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				FD275F7E2E8F3FBA0034D773 /* Exceptions for "InvoiceAmericano" folder in "InvoiceAmericano" target */,
+				FDC01E2D2EB4875B00CDDFEC /* Exceptions for "InvoiceAmericano" folder in "InvoiceAmericano" target */,
 			);
 			path = InvoiceAmericano;
 			sourceTree = "<group>";
@@ -429,6 +429,8 @@
 		};
 		FD00AB142E7D157200D6874A /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = FD00AAF42E7D157100D6874A /* InvoiceAmericano */;
+			baseConfigurationReferenceRelativePath = Config.xcconfig;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -464,6 +466,8 @@
 		};
 		FD00AB152E7D157200D6874A /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = FD00AAF42E7D157100D6874A /* InvoiceAmericano */;
+			baseConfigurationReferenceRelativePath = Config.xcconfig;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

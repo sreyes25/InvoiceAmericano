@@ -16,7 +16,7 @@ enum RealtimeService {
         if channel != nil { return }
 
         // Create a V2 channel
-        let ch = SB.shared.client.realtimeV2.channel("activity-feed")
+        let ch = SupabaseManager.shared.client.realtimeV2.channel("activity-feed")
 
         // Listen for INSERTs on public.invoice_activity using the typed API
         let _ = ch.onPostgresChange(

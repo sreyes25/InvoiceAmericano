@@ -24,11 +24,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     // Device token → hex string
-    func application(_ application: UIApplication,
-                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-        Task { try? await SB.shared.registerDeviceToken(token) }
-    }
+//    func application(_ application: UIApplication,
+//                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+//        let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
+//        Task { try? await SupabaseManager.shared.registerDeviceToken(token) }
+//    }
 
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {

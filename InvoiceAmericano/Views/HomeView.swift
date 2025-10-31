@@ -7,6 +7,8 @@
 
 import SwiftUI
 import SceneKit
+import Supabase
+import Auth
 
 struct HomeView: View {
     // Parent can switch tabs if needed (0=Home, 1=Invoices, 2=Clients, 3=Activity, 4=Account)
@@ -18,6 +20,23 @@ struct HomeView: View {
 
     @State private var isLoading = false
     @State private var errorText: String?
+
+    // Stripe Connect state
+    @State private var stripeStatus: StripeStatus?
+    @State private var stripeLoading = false
+    // Stripe brand color (#635BFF) and "fully ready" state
+    private let stripeBrand = Color(red: 0.388, green: 0.357, blue: 1.0) // #635BFF
+    private var stripeFullyReady: Bool {
+        if let s = stripeStatus, s.connected == true {
+            return (s.details_submitted == true) && (s.charges_enabled == true) && (s.payouts_enabled == true)
+        }
+        return false
+    }
+
+    private var stripeSectionStatus: String {
+        if stripeStatus == nil { return "Checking…" }
+        return stripeFullyReady ? "Active" : "Action needed"
+    }
 
     // Sheets
     @State private var showNewInvoice = false
@@ -35,6 +54,9 @@ struct HomeView: View {
 
                 // --- Quick actions (now adaptive grid) ---
                 quickActions
+
+                // --- Payments (Stripe Connect) ---
+                paymentsSection
 
                 if let errorText {
                     Text(errorText).foregroundStyle(.red)
@@ -124,8 +146,211 @@ struct HomeView: View {
             }
         }
 
-        .task { await refresh() }
+        .task {
+            await refresh()
+            await refreshStripe()
+        }
         .refreshable { await refresh() }
+    } // <-- close body
+
+    // MARK: - Payments section (Stripe Connect)
+    private var paymentsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack {
+                Text("Payments with Stripe")
+                    .font(.headline)
+                Spacer()
+                Text(stripeSectionStatus)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(
+                        stripeStatus == nil
+                            ? AnyShapeStyle(.secondary)
+                            : AnyShapeStyle(stripeFullyReady ? Color.green : Color.orange)
+                    )
+            }
+            .padding(.horizontal)
+
+            // --- Status card ---
+            // Show the status/onboarding card unless the account is fully ready
+            if stripeStatus == nil || !stripeFullyReady {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    Task { await onStripePrimaryTap() }
+                } label: {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill((stripeFullyReady ? Color.green : Color.orange).opacity(0.15))
+                                .frame(width: 32, height: 32)
+                            Image(systemName: stripeFullyReady ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(stripeFullyReady ? .green : .orange)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(stripeFullyReady ? "Stripe Connected" : "Connect with Stripe")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(stripeStatusText())
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.black.opacity(0.06))
+                    )
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal)
+            }
+
+            // --- Primary action button under the card ---
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                Task {
+                    if stripeFullyReady { await IA_openStripeManage() }
+                    else { await openStripeOnboarding() }
+                }
+            } label: {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(stripeBrand)
+                    Group {
+                        if stripeFullyReady {
+                            // Centered, bold "stripe" wordmark-style label (no icon)
+                            Text("stripe")
+                                .font(.system(size: 22, weight: .black, design: .rounded))
+                                .foregroundStyle(.white)
+                                .kerning(0.5)
+                        } else {
+                            // Connect CTA with icon
+                            HStack(spacing: 10) {
+                                Image(systemName: "link.badge.plus")
+                                    .foregroundStyle(.white)
+                                Text("Connect with Stripe")
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                Spacer()
+                                if stripeLoading { ProgressView().tint(.white) }
+                            }
+                            .padding(18)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 68)
+                .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
+                .padding(.horizontal)
+            }
+            .buttonStyle(.plain)
+            .disabled(stripeLoading)
+            .opacity(stripeLoading ? 0.8 : 1.0)
+        }
+        .padding(.top, 2)
+        .onAppear { Task { await refreshStripe() } }
+    }
+
+    private func stripeStatusText() -> String {
+        // If we don't have a status yet, show the generic connect prompt
+        guard let s = stripeStatus else {
+            return "Connect to accept payments from your invoices."
+        }
+        // Not connected yet
+        guard s.connected == true else {
+            return "Connect to accept payments from your invoices."
+        }
+        // Fully ready
+        if stripeFullyReady { return "Ready: charges & payouts enabled" }
+        // Connected but still needs steps
+        var parts: [String] = []
+        if s.details_submitted != true { parts.append("finish verification") }
+        if s.charges_enabled != true { parts.append("enable charges") }
+        if s.payouts_enabled != true { parts.append("enable payouts") }
+        if parts.isEmpty { return "Finalizing Stripe setup…" }
+        return "Connected — " + parts.joined(separator: " • ") + "."
+    }
+
+    private var stripePrimaryTitle: String {
+        let connected = stripeStatus?.connected ?? false
+        return connected ? "Stripe Connected" : "Connect with Stripe"
+    }
+
+    private var stripePrimaryIcon: String {
+        let connected = stripeStatus?.connected ?? false
+        return connected ? "checkmark.seal.fill" : "creditcard.fill"
+    }
+
+    private var stripeSubtitle: String {
+        if let s = stripeStatus {
+            if s.connected == true {
+                let all = [s.details_submitted == true, s.charges_enabled == true, s.payouts_enabled == true]
+                if all.allSatisfy({ $0 }) {
+                    return "Ready: charges & payouts enabled"
+                } else {
+                    return "Connected — finish verification to enable payouts"
+                }
+            } else {
+                return "Connect to accept payments"
+            }
+        }
+        return "Connect to accept payments"
+    }
+
+    // Primary tap handler: connect if not connected, otherwise open manage
+    private func onStripePrimaryTap() async {
+        if stripeStatus?.connected == true {
+            await IA_openStripeManage()
+        } else {
+            await openStripeOnboarding()
+        }
+    }
+
+    // MARK: - Stripe helpers
+    private func refreshStripe() async {
+        await MainActor.run { stripeLoading = true }
+        let status = await IA_fetchStripeStatus()
+        await MainActor.run {
+            self.stripeStatus = status
+            self.stripeLoading = false
+        }
+    }
+
+    // Opens the Connect onboarding link from your Edge Function
+    private func openStripeOnboarding() async {
+        await MainActor.run { stripeLoading = true }
+        defer { Task { await MainActor.run { stripeLoading = false } } }
+
+        do {
+            let client = SupabaseManager.shared.client
+            guard
+                let session = try? await client.auth.session,
+                let url = URL(string: "https://pbhlynmgmgrzhynnrmna.supabase.co/functions/v1/create_connect_link")
+            else { return }
+
+            var req = URLRequest(url: url)
+            req.httpMethod = "GET"
+            req.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else { return }
+            if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+               let link = dict["url"],
+               let linkURL = URL(string: link) {
+                await UIApplication.shared.open(linkURL)
+            }
+        } catch {
+            await MainActor.run { self.errorText = error.localizedDescription }
+        }
     }
 
     // MARK: - Sections
@@ -243,7 +468,6 @@ struct HomeView: View {
                                     .animation(.spring(response: 0.4, dampingFraction: 0.7), value: showNewInvoice)
                 }
                 .buttonStyle(.plain)
-                
 
                 // Invoices -> slide up recent invoices
                 Button {
@@ -1285,7 +1509,7 @@ private struct MobiusSceneView: UIViewRepresentable {
         m.roughness.contents = 0.3
 
         m.isDoubleSided = true
-        return m
+        return m;
     }
 }
 
@@ -1597,7 +1821,7 @@ private struct AIMobiusSolidBadge: View {
     }
 }
 
-// ===== Apple‑style animated infinity ribbon (lemniscate) =====
+// ===== Apple-style animated infinity ribbon (lemniscate) =====
 private struct InfinityRibbonShape: Shape {
     // 0...1 phase for animating highlight position
     var phase: CGFloat = 0
@@ -1708,7 +1932,7 @@ private struct AIAssistantComingSoonSheet: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                Text("Soon, you’ll be able to integrate your smart glasses to take pictures & videos, record audible notes with translation for your assistant to auto‑generate the estimate or invoices for at your convenience.")
+                Text("Soon, you’ll be able to integrate your smart glasses to take pictures & videos, record audible notes with translation for your assistant to auto-generate the estimate or invoices for at your convenience.")
                     .font(.body)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
