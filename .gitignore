@@ -1,1 +1,6 @@
 InvoiceAmericano/Config.xcconfig
+
+# Secrets
+InvoiceAmericano/Config.xcconfig
+Config.xcconfig
+*.xcconfig
