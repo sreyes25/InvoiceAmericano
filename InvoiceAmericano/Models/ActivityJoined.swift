@@ -7,10 +7,12 @@
 
 import Foundation
 
+/// Includes `read_at` to support unread indicators and batching read receipts.
 struct ActivityJoined: Identifiable, Decodable {
     let id: UUID
     let event: String
     let created_at: String
+    var read_at: String?         // CHANGED to var so views can optimistically mark as read
     let invoice_id: UUID?        // NEW: FK from invoice_activity
 
     // Supabase row shape from:
@@ -48,4 +50,8 @@ struct ActivityJoined: Identifiable, Decodable {
     struct ClientName: Decodable {
         let name: String?
     }
+
+    // MARK: - Convenience
+    /// True if this activity has not been marked as read (read_at is NULL in DB)
+    var isUnread: Bool { read_at == nil }
 }

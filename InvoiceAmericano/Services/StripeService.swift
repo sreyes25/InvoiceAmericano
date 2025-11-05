@@ -44,7 +44,7 @@ func IA_fetchStripeStatus() async -> StripeStatus? {
     }
 
     do {
-        var req = try await iaAuthorizedRequest(url: url)
+        let req = try await iaAuthorizedRequest(url: url)
         // No body for status
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse else {
@@ -80,7 +80,7 @@ func IA_openStripeManage() async {
     }
 
     do {
-        var req = try await iaAuthorizedRequest(url: url, method: "GET")
+        let req = try await iaAuthorizedRequest(url: url, method: "GET")
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse else {
             print("❌ IA_openStripeManage: non-HTTP response")

@@ -17,6 +17,85 @@ private struct ActivityInsert: Encodable {
 
 enum ActivityService {
     
+    static func markAsRead(_ ids: [UUID]) async {
+        guard !ids.isEmpty else { return }
+        let client = SupabaseManager.shared.client
+        let now = ISO8601DateFormatter().string(from: Date())
+
+        do {
+            _ = try await client
+                .from("invoice_activity")
+                .update(["read_at": now])
+                .in("id", values: ids.map { $0.uuidString })
+                .select()
+                .execute()
+            // After a successful update, broadcast so Home badge refreshes
+            await MainActor.run {
+                NotificationCenter.default.post(name: .activityUnreadChanged, object: nil)
+            }
+            print("✅ markAsRead updated \(ids.count) rows")
+        } catch {
+            print("❌ markAsRead failed: \(error)")
+        }
+    }
+    
+    // MARK: - Read / Unread helpers
+    private struct ReadUpdate: Encodable { let read_at: String }
+
+    /// Marks the given activity IDs as read (sets read_at = now()).
+    /// Non-throwing: tries a bulk update first; falls back to per-row update if the client version
+    /// doesn't support `.in("id", value: ...)`.
+    static func markActivitiesRead(ids: [UUID]) async {
+        guard !ids.isEmpty else { return }
+
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let now = f.string(from: Date())
+        let payload = ReadUpdate(read_at: now)
+        let client = SupabaseManager.shared.client
+        let stringIds = ids.map { $0.uuidString }
+
+        // Attempt bulk update first.
+        do {
+            _ = try await client
+                .from("invoice_activity")
+                .update(payload)
+                .in("id", values: stringIds)
+                .execute()
+            return
+        } catch {
+            // Fallback: update one-by-one for widest compatibility.
+            for id in stringIds {
+                do {
+                    _ = try await client
+                        .from("invoice_activity")
+                        .update(payload)
+                        .eq("id", value: id)
+                        .execute()
+                } catch {
+                    print("⚠️ markActivitiesRead fallback failed for \(id):", error)
+                }
+            }
+        }
+    }
+
+    /// Returns the unread count for the current user by joining invoices (filters by invoices.user_id).
+    static func unreadCountForCurrentUser() async -> Int {
+        guard let uid = SupabaseManager.shared.client.auth.currentUser?.id else { return 0 }
+        do {
+            let response = try await SupabaseManager.shared.client
+                .from("invoice_activity")
+                .select("id, invoices!inner(user_id)", head: true, count: .exact)
+                .is("read_at", value: nil)
+                .eq("invoices.user_id", value: uid.uuidString)
+                .execute()
+            return response.count ?? 0
+        } catch {
+            print("⚠️ unreadCountForCurrentUser failed:", error)
+            return 0
+        }
+    }
+    
     // Recent joined activity rows for the dashboard preview
     static func fetchRecentActivityJoined(limit: Int = 5) async throws -> [ActivityJoined] {
         let client = SupabaseManager.shared.client
@@ -28,6 +107,7 @@ enum ActivityService {
             invoice_id,
             event,
             created_at,
+            read_at,
             invoice:invoices!invoice_activity_invoice_id_fkey(
               number,
               client:clients(name)
@@ -50,6 +130,7 @@ enum ActivityService {
                     invoice_id,
                     event,
                     created_at,
+                    read_at,
                     invoice:invoices!invoice_activity_invoice_id_fkey(
                       number,
                       client:clients(name)
@@ -92,7 +173,7 @@ enum ActivityService {
         // Replace both constraint names below with your actual Supabase FK constraint names.
         let select =
         """
-        id, invoice_id, event, created_at,
+        id, invoice_id, event, created_at, read_at,
         invoice:invoices!invoice_activity_invoice_id_fkey(
             number,
             client:clients!invoices_client_id_fkey(name)
@@ -161,13 +242,26 @@ enum ActivityService {
     }
 
     static func countUnread() async throws -> Int {
-        let resp = try await SupabaseManager.shared.client
-            .from("invoice_activity")
-            .select("id", head: false, count: .exact)
-            .is("read_at", value: nil)
-            .is("deleted_at", value: nil)
-            .execute()
-        return resp.count ?? 0
+        let client = SupabaseManager.shared.client
+        if let uid = client.auth.currentUser?.id {
+            let resp = try await client
+                .from("invoice_activity")
+                .select("id, invoices!inner(user_id)", head: true, count: .exact)
+                .is("read_at", value: nil)
+                .is("deleted_at", value: nil)
+                .eq("invoices.user_id", value: uid.uuidString)
+                .execute()
+            return resp.count ?? 0
+        } else {
+            // Fallback (single-tenant or no auth available)
+            let resp = try await client
+                .from("invoice_activity")
+                .select("id", head: true, count: .exact)
+                .is("read_at", value: nil)
+                .is("deleted_at", value: nil)
+                .execute()
+            return resp.count ?? 0
+        }
     }
 
     static func markAllAsRead() async throws {

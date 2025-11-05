@@ -10,6 +10,15 @@ import SceneKit
 import Supabase
 import Auth
 
+// Fallback wrapper so NavigationStack can push an invoice preview.
+// If your real screen is `InvoiceDetailView`, this forwards to it.
+struct InvoicePreviewView: View {
+    let invoiceId: UUID
+    var body: some View {
+        InvoiceDetailView(invoiceId: invoiceId)
+    }
+}
+
 struct HomeView: View {
     // Parent can switch tabs if needed (0=Home, 1=Invoices, 2=Clients, 3=Activity, 4=Account)
     var onSelectTab: ((Int) -> Void)? = nil
@@ -43,6 +52,9 @@ struct HomeView: View {
     @State private var showInvoicesSheet = false
     @State private var showActivitySheet = false
     @State private var showAISheet = false
+
+    // Unread activity count (for badge)
+    @State private var unreadCount: Int = 0
 
     var body: some View {
         // MainTabView already wraps this in a NavigationStack
@@ -149,8 +161,33 @@ struct HomeView: View {
         .task {
             await refresh()
             await refreshStripe()
+            await refreshUnread() // ← fetch unread count on first load
         }
-        .refreshable { await refresh() }
+        // Listen for unread count broadcasts from Activity screens
+        .onReceive(NotificationCenter.default.publisher(for: .activityUnreadChanged)) { note in
+            if let n = note.userInfo?["count"] as? Int {
+                unreadCount = n
+            }
+        }
+        .refreshable {
+            await refresh()
+            await refreshUnread()
+        }
+        .onChange(of: showActivitySheet) { oldValue, newValue in
+            // When the sheet transitions from open -> closed, recompute unread and broadcast
+            if oldValue == true && newValue == false {
+                Task {
+                    let n = (try? await ActivityService.countUnread()) ?? 0
+                    await MainActor.run {
+                        NotificationCenter.default.post(
+                            name: .activityUnreadChanged,
+                            object: nil,
+                            userInfo: ["count": n]
+                        )
+                    }
+                }
+            }
+        }
     } // <-- close body
 
     // MARK: - Payments section (Stripe Connect)
@@ -483,11 +520,49 @@ struct HomeView: View {
                 // Activity -> slide up recent activity
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    showActivitySheet = true
+
+                    // 1) Optimistically clear the badge immediately (feels instant)
+                    unreadCount = 0
+                    NotificationCenter.default.post(
+                        name: .activityUnreadChanged,
+                        object: nil,
+                        userInfo: ["count": 0]
+                    )
+
+                    // 2) Mark the currently visible preview items as read (best-effort)
+                    let ids = recentActivity
+                        .filter { $0.read_at == nil }
+                        .map { $0.id }
+
+                    if !ids.isEmpty {
+                        Task {
+                            await ActivityService.markActivitiesRead(ids: ids)
+
+                            // 3) Recompute server truth and broadcast (covers other unread not in preview)
+                            let n = (try? await ActivityService.countUnread()) ?? 0
+                            await MainActor.run {
+                                NotificationCenter.default.post(
+                                    name: .activityUnreadChanged,
+                                    object: nil,
+                                    userInfo: ["count": n]
+                                )
+                                showActivitySheet = true
+                            }
+                        }
+                    } else {
+                        showActivitySheet = true
+                    }
                 } label: {
-                    QuickActionCard(title: "Activity",
-                                    systemImage: "bell.badge.fill",
-                                    colors: [.purple, .pink])
+                    ZStack(alignment: .topTrailing) {
+                        QuickActionCard(title: "Activity",
+                                        systemImage: "bell.badge.fill",
+                                        colors: [.purple, .pink])
+                        if unreadCount > 0 {
+                            UnreadBadge(count: unreadCount)
+                                .padding(.top, 6)
+                                .padding(.trailing, 6)
+                        }
+                    }
                 }
                 .buttonStyle(.plain)
 
@@ -572,37 +647,24 @@ struct HomeView: View {
                 Text("No recent activity").foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity).padding(.vertical, 12)
             } else {
-                ForEach(recentActivity, id: \.id) { a in
-                    if let id = a.invoice_id {
-                        NavigationLink(value: id) {
-                            activityRow(a)
+                LazyVStack(spacing: 12) {
+                    ForEach(recentActivity, id: \.id) { (a: ActivityJoined) in
+                        if let id = a.invoice_id {
+                            NavigationLink(value: id) {
+                                ActivityCardRow(a: a)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            ActivityCardRow(a: a)
                         }
-                        .buttonStyle(.plain)
-                    } else {
-                        activityRow(a)
                     }
-                    Divider().padding(.leading, 16)
                 }
+                .padding(.horizontal)
             }
         }
         .background(Color(.systemBackground))
     }
 
-    @ViewBuilder
-    private func activityRow(_ a: ActivityJoined) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon(for: a.event))
-                .frame(width: 22)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(activityTitle(a)).font(.subheadline)
-                Text(relativeTime(a.created_at))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 10)
-    }
 
     // MARK: - Data load
 
@@ -645,6 +707,12 @@ struct HomeView: View {
     }
 
     // MARK: - Helpers
+
+    /// Fetches the unread activity count and updates the badge state.
+    private func refreshUnread() async {
+        let n = (try? await ActivityService.countUnread()) ?? 0
+        await MainActor.run { unreadCount = n }
+    }
 
     private func currency(_ value: Double, code: String? = "USD") -> String {
         let f = NumberFormatter()
@@ -733,6 +801,23 @@ private struct QuickActionCard: View {
 }
 
 // Pill used in Home list for recent invoices
+
+// Tiny red badge used on Activity quick action
+private struct UnreadBadge: View {
+    let count: Int
+    var body: some View {
+        Text(display)
+            .font(.caption2.bold())
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color.red))
+            .foregroundStyle(.white)
+            .accessibilityLabel(Text("\(display) unread"))
+    }
+    private var display: String {
+        count > 99 ? "99+" : "\(count)"
+    }
+}
 private struct StatusPill: View {
     let status: String
     var body: some View {
@@ -788,103 +873,96 @@ private struct RecentInvoicesSheet: View {
     }
 
     var body: some View {
-        List {
-            // Header controls
-            Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    // Quick filter chips
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(Filter.allCases, id: \.self) { f in
-                                Button {
-                                    filter = f
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: icon(for: f))
-                                        Text(title(for: f))
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+
+                    // ===== Header controls (filters + search) =====
+                    VStack(alignment: .leading, spacing: 8) {
+                        // Quick filter chips
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(Filter.allCases, id: \.self) { (f: Filter) in
+                                    Button {
+                                        filter = f
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: icon(for: f))
+                                            Text(title(for: f))
+                                        }
+                                        .font(.footnote.weight(.semibold))
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(
+                                            Capsule().fill(
+                                                filter == f
+                                                ? Color.blue.opacity(0.18)
+                                                : Color(.secondarySystemBackground)
+                                            )
+                                        )
+                                        .overlay(
+                                            Capsule().strokeBorder(
+                                                filter == f ? Color.blue.opacity(0.35)
+                                                            : Color.black.opacity(0.06)
+                                            )
+                                        )
                                     }
-                                    .font(.footnote.weight(.semibold))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .background(
-                                        Capsule().fill(
-                                            filter == f
-                                            ? Color.blue.opacity(0.18)
-                                            : Color(.secondarySystemBackground)
-                                        )
-                                    )
-                                    .overlay(
-                                        Capsule().strokeBorder(
-                                            filter == f ? Color.blue.opacity(0.35)
-                                                        : Color.black.opacity(0.06)
-                                        )
-                                    )
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+
+                        // Search
+                        TextField("Search by number or client", text: $search)
+                            .textInputAutocapitalization(.never)
+                            .disableAutocorrection(true)
+                            .padding(10)
+                            .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                    }
+                    .padding(.horizontal)
+
+                    // ===== Invoices list (cards) =====
+                    if filtered.isEmpty {
+                        VStack(spacing: 8) {
+                            Image(systemName: "doc.text.magnifyingglass").font(.title2)
+                            Text(emptyCopy)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 28)
+                    } else {
+                        LazyVStack(spacing: 12) {
+                            ForEach(filtered) { (inv: InvoiceRow) in
+                                NavigationLink(value: inv.id) {
+                                    InvoiceCardRow(inv: inv)
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
-                        .padding(.vertical, 2)
+                        .padding(.horizontal)
                     }
 
-                    // Search
-                    TextField("Search by number or client", text: $search)
-                        .textInputAutocapitalization(.never)
-                        .disableAutocorrection(true)
-                        .padding(10)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
-                }
-                .listRowInsets(.init(top: 8, leading: 16, bottom: 4, trailing: 16))
-            }
-
-            // Invoices
-            Section {
-                if filtered.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "doc.text.magnifyingglass").font(.title2)
-                        Text(emptyCopy)
-                            .foregroundStyle(.secondary)
+                    // ===== Footer =====
+                    Button {
+                        onOpenFullInvoices?()
+                    } label: {
+                        Label("Open full invoices list", systemImage: "list.bullet.rectangle")
                     }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 28)
-                } else {
-                    ForEach(filtered) { inv in
-                        NavigationLink(value: inv.id) {
-                            InvoiceCardRow(inv: inv)
-                        }
-                        // trailing swipe: Send
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button {
-                                // TODO: integrate send flow
-                                // await InvoiceService.sendInvoice(id: inv.id)
-                            } label: { Label("Send", systemImage: "paperplane") }
-                            .tint(.blue)
-                        }
-                        // leading swipe: Mark Paid
-                        .swipeActions(edge: .leading) {
-                            Button {
-                                // TODO: integrate mark paid
-                                // await InvoiceService.markPaid(id: inv.id)
-                            } label: { Label("Mark Paid", systemImage: "checkmark.seal") }
-                            .tint(.green)
-                        }
-                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
+                }
+                .padding(.top, 8)
+            }
+            .navigationTitle("Recent Invoices")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { onClose?() }
                 }
             }
-
-            // FooterR
-            Section {
-                Button {
-                    onOpenFullInvoices?()   // dismiss sheet + switch tab
-                } label: {
-                    Label("Open full invoices list", systemImage: "list.bullet.rectangle")
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
-        .navigationTitle("Recent Invoices")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Done") { onClose?() }
+            .navigationDestination(for: UUID.self) { invoiceId in
+                // Navigate to your invoice preview/detail screen
+                InvoicePreviewView(invoiceId: invoiceId)
             }
         }
     }
@@ -948,6 +1026,12 @@ private struct InvoiceCardRow: View {
                     .monospacedDigit()
                 StatusPillSmall(text: displayStatus(inv))
             }
+
+            // Chevron INSIDE the card
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 6)
         }
         .padding(12)
         .background(
@@ -1054,14 +1138,15 @@ private struct RecentActivitySheet: View {
     }
 
     var body: some View {
-        List {
-            // Header controls
-            Section {
+        NavigationStack {
+        ScrollView {
+            VStack(spacing: 16) {
+                // ===== Header controls (filters + search) =====
                 VStack(alignment: .leading, spacing: 8) {
                     // Filters
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(Filter.allCases, id: \.self) { f in
+                            ForEach(Filter.allCases, id: \.self) { (f: Filter) in
                                 Button {
                                     filter = f
                                 } label: {
@@ -1099,15 +1184,13 @@ private struct RecentActivitySheet: View {
                         .padding(10)
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
                 }
-                .listRowInsets(.init(top: 8, leading: 16, bottom: 4, trailing: 16))
-            }
+                .padding(.horizontal)
 
-            // Grouped by day sections
-            let groups = groupByDay(filtered)
-            let keys = groupedDayKeys(from: groups)
+                // ===== Grouped activity list (cards) =====
+                let groups = groupByDay(filtered)
+                let keys = groupedDayKeys(from: groups)
 
-            if filtered.isEmpty {
-                Section {
+                if filtered.isEmpty {
                     VStack(spacing: 8) {
                         Image(systemName: "bell.slash").font(.title2)
                         Text(search.isEmpty ? "No activity for this filter yet" : "No results for “\(search)”")
@@ -1115,50 +1198,62 @@ private struct RecentActivitySheet: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 28)
-                }
-            } else {
-                ForEach(keys, id: \.self) { dayKey in
-                    Section(header: Text(dayHeader(from: dayKey))) {
-                        let rows = groups[dayKey] ?? []
-                        ForEach(rows) { a in
-                            // If we have an invoice ID, allow drill-in via value navigation
-                            Group {
-                                if let id = a.invoice_id {
-                                    NavigationLink(value: id) { ActivityCardRow(a: a) }
-                                } else {
-                                    ActivityCardRow(a: a)
-                                }
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    Task {
-                                        try? await ActivityService.delete(id: a.id)
-                                        await recalcAndBroadcastUnread()
+                } else {
+                    VStack(spacing: 18) {
+                        ForEach(keys, id: \.self) { dayKey in
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(dayHeader(from: dayKey))
+                                    .font(.headline)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal)
+
+                                LazyVStack(spacing: 12) {
+                                    let rows: [ActivityJoined] = groups[dayKey] ?? []
+                                    ForEach(rows) { (a: ActivityJoined) in
+                                        Group {
+                                            if let id = a.invoice_id {
+                                                NavigationLink(value: id) { ActivityCardRow(a: a) }
+                                                    .buttonStyle(.plain)
+                                            } else {
+                                                ActivityCardRow(a: a)
+                                            }
+                                        }
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                            Button(role: .destructive) {
+                                                Task {
+                                                    try? await ActivityService.delete(id: a.id)
+                                                    await recalcAndBroadcastUnread()
+                                                }
+                                            } label: { Label("Delete", systemImage: "trash") }
+                                        }
                                     }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
                                 }
+                                .padding(.horizontal)
                             }
                         }
                     }
                 }
-            }
 
-            // Footer
-            Section {
+                // ===== Footer =====
                 Button {
                     onOpenFullActivity?()   // dismiss sheet + switch tab
                 } label: {
                     Label("Open full activity feed", systemImage: "list.bullet.rectangle")
                 }
+                .padding(.horizontal)
+                .padding(.bottom, 12)
             }
+            .padding(.top, 8)
         }
-        .listStyle(.insetGrouped)
         .navigationTitle("Recent Activity")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Done") { onClose?() }
             }
+        }
+        .navigationDestination(for: UUID.self) { invoiceId in
+            InvoicePreviewView(invoiceId: invoiceId)
+        }
         }
     }
 
@@ -1233,6 +1328,10 @@ private struct RecentActivitySheet: View {
         r.unitsStyle = .short
         return r.localizedString(for: d, relativeTo: Date())
     }
+    
+    // CHANGE: Recompute unread count and broadcast the real value to Home/others.
+    // This helper intentionally does not navigate or mutate parent state;
+    // listeners (e.g., HomeView) update their own `unreadCount` from the notification.
     private func recalcAndBroadcastUnread() async {
         let n = (try? await ActivityService.countUnread()) ?? 0
         await MainActor.run {
@@ -1253,6 +1352,7 @@ private struct ActivityCardRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
+            // Leading icon
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(iconGradient)
@@ -1262,20 +1362,26 @@ private struct ActivityCardRow: View {
             }
             .frame(width: 36, height: 36)
 
+            // LEFT: Client name + invoice number (two-line, like Invoices UI)
             VStack(alignment: .leading, spacing: 2) {
-                Text(titleFor(a))
+                Text(a.clientName)
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(2)
-                Text(relativeTime(a.created_at))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(a.invoiceNumber)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
 
             Spacer()
 
-            // Tiny status chip when event implies a state
-            if let chip = statusChipText(a.event) {
-                StatusPillTiny(text: chip)
+            // RIGHT: Event type chip + chevron (inside the card)
+            HStack(spacing: 8) {
+                StatusPillTiny(text: eventDisplay(a.event))
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(12)
@@ -1287,8 +1393,12 @@ private struct ActivityCardRow: View {
             RoundedRectangle(cornerRadius: 14)
                 .strokeBorder(Color.black.opacity(0.05))
         )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(Text(relativeTime(a.created_at)))
     }
 
+    // Gradient tint for the icon based on event
     private var iconGradient: LinearGradient {
         let colors: [Color]
         switch a.event {
@@ -1298,27 +1408,9 @@ private struct ActivityCardRow: View {
         case "paid":     colors = [.green, .teal]
         case "due_soon": colors = [.orange, .pink]
         case "overdue":  colors = [.red, .orange]
-        default:         colors = [.gray, .gray.opacity(0.7)]
+        default:          colors = [.gray, .gray.opacity(0.7)]
         }
         return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
-    }
-
-    private func titleFor(_ a: ActivityJoined) -> String {
-        let number = a.invoiceNumber
-        let client = a.clientName
-        let action: String = {
-            switch a.event {
-            case "created":  return "Created"
-            case "sent":     return "Sent"
-            case "opened":   return "Opened"
-            case "paid":     return "Paid"
-            case "overdue":  return "Overdue"
-            case "due_soon": return "Due Soon"
-            default:         return a.event.capitalized
-            }
-        }()
-        let left = number.isEmpty || number == "—" ? "Invoice" : "Invoice \(number)"
-        return client == "—" ? "\(left) — \(action)" : "\(left) — \(action) (\(client))"
     }
 
     private func iconFor(_ event: String) -> String {
@@ -1329,7 +1421,19 @@ private struct ActivityCardRow: View {
         case "paid":     return "checkmark.seal"
         case "overdue":  return "exclamationmark.triangle"
         case "due_soon": return "clock.badge.exclamationmark"
-        default:         return "bell"
+        default:          return "bell"
+        }
+    }
+
+    private func eventDisplay(_ event: String) -> String {
+        switch event.lowercased() {
+        case "created":  return "Created"
+        case "sent":     return "Sent"
+        case "opened":   return "Opened"
+        case "paid":     return "Paid"
+        case "overdue":  return "Overdue"
+        case "due_soon": return "Due Soon"
+        default:          return event.capitalized
         }
     }
 
@@ -1344,13 +1448,9 @@ private struct ActivityCardRow: View {
         return s
     }
 
-    private func statusChipText(_ event: String) -> String? {
-        switch event {
-        case "paid": return "Paid"
-        case "overdue": return "Overdue"
-        case "sent": return "Sent"
-        default: return nil
-        }
+    // Single, compact accessibility label mirroring the visual layout
+    private var accessibilityLabel: Text {
+        Text("\(a.clientName), \(a.invoiceNumber), \(eventDisplay(a.event)), \(relativeTime(a.created_at))")
     }
 }
 
@@ -2121,3 +2221,4 @@ private struct ThemedNewInvoiceSheet: View {
         }
     }
 }
+

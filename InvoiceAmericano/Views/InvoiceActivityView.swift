@@ -46,41 +46,65 @@ struct InvoiceActivityView: View {
                 .listStyle(.insetGrouped)
             }
         }
-        .task { await load() }
+        .task { await load() }            // load + mark-as-read + notify
         .navigationTitle("Activity")
     }
 
+    // MARK: - Data
+
     private func load() async {
-        loading = true; error = nil
+        loading = true
+        error = nil
         do {
             let evs = try await ActivityService.fetch(invoiceId: invoiceId)
-            await MainActor.run { self.events = evs; self.loading = false }
+            await MainActor.run {
+                self.events = evs
+                self.loading = false
+            }
+
+            // NOTE: ActivityEvent doesn't expose `read_at`, so mark all loaded
+            // rows as read for this invoice. If you later add `read_at` to the
+            // model, filter to only unread IDs here.
+            let unreadIds = evs.map { $0.id }
+            if !unreadIds.isEmpty {
+                await ActivityService.markActivitiesRead(ids: unreadIds)
+
+                // Ask Home to recompute the red badge (it will refetch count)
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .activityUnreadChanged, object: nil)
+                }
+            }
         } catch {
-            await MainActor.run { self.error = error.localizedDescription; self.loading = false }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.loading = false
+            }
         }
     }
 
+    // MARK: - UI helpers
+
     private func icon(for event: String) -> String {
         switch event {
-        case "created": return "doc.badge.plus"
-        case "opened": return "eye"
-        case "sent": return "paperplane"
-        case "paid": return "checkmark.seal"
+        case "created":  return "doc.badge.plus"
+        case "opened":   return "eye"
+        case "sent":     return "paperplane"
+        case "paid":     return "checkmark.seal"
         case "archived": return "archivebox"
-        case "deleted": return "trash"
-        default: return "clock"
+        case "deleted":  return "trash"
+        default:         return "clock"
         }
     }
 
     private func title(for ev: ActivityEvent) -> String {
         switch ev.event {
-        case "created": return "Invoice created"
-        case "opened": return "Invoice opened"
-        case "sent": return "Invoice sent"
-        case "paid": return "Invoice paid"
+        case "created":  return "Invoice created"
+        case "opened":   return "Invoice opened"
+        case "sent":     return "Invoice sent"
+        case "paid":     return "Invoice paid"
         case "archived": return "Invoice archived"
-        case "deleted": return "Invoice deleted"
-        default: return ev.event.capitalized
+        case "deleted":  return "Invoice deleted"
+        default:         return ev.event.capitalized
         }
     }
 

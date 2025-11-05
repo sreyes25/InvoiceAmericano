@@ -3,6 +3,11 @@
 //  InvoiceAmericano
 //
 
+//
+//  ActivityAllView.swift
+//  InvoiceAmericano
+//
+
 import SwiftUI
 
 struct ActivityAllView: View {
@@ -76,14 +81,53 @@ struct ActivityAllView: View {
             }
         }
         .navigationTitle("Activity")
-        .task { await initialLoad() }                                // first load
-        .onAppear { Task { await markReadAndBroadcastZero() } }      // clear badge when viewing
+        // MARK: Mark visible rows as read (server + optimistic), then notify Home
+        .task {
+            await load()
+            
+
+            // Find unread rows currently shown
+            let unreadIndexes = items.enumerated().compactMap { idx, ev in
+                ev.read_at == nil ? idx : nil
+            }
+            let unreadIDs = unreadIndexes.map { items[$0].id }
+
+            // Kick off server update
+            Task { await ActivityService.markAsRead(unreadIDs) }
+            
+            // Optimistically flip local state so blue dots disappear now
+            let now = ISO8601DateFormatter().string(from: Date())
+            for i in unreadIndexes {
+                items[i].read_at = now
+            }
+            // After optimistic local clear + server mark:
+            Task { await recalcAndBroadcastUnread() }
+
+            // Ask Home to recompute badge (it will pull fresh count)
+            NotificationCenter.default.post(name: .activityUnreadChanged, object: nil)
+        }
         .navigationDestination(for: UUID.self) { invoiceId in
             InvoiceDetailView(invoiceId: invoiceId)
         }
     }
+    
+    private func recalcAndBroadcastUnread() async {
+        let n = (try? await ActivityService.countUnread()) ?? 0
+        await MainActor.run {
+            NotificationCenter.default.post(
+                name: .activityUnreadChanged,
+                object: nil,
+                userInfo: ["count": n]
+            )
+        }
+    }
 
     // MARK: - Loading
+
+    // Thin wrapper so the .task snippet can call `load()`
+    private func load() async {
+        await initialLoad()
+    }
 
     private func initialLoad() async {
         loading = true; error = nil; reachedEnd = false
@@ -120,30 +164,6 @@ struct ActivityAllView: View {
         }
     }
 
-    // MARK: - Read / Badge sync
-
-    private func markReadAndBroadcastZero() async {
-        try? await ActivityService.markAllAsRead()   // mark read server-side
-        await MainActor.run {
-            NotificationCenter.default.post(
-                name: .activityUnreadChanged,
-                object: nil,
-                userInfo: ["count": 0]
-            )
-        }
-    }
-
-    private func recalcAndBroadcastUnread() async {
-        let n = (try? await ActivityService.countUnread()) ?? 0
-        await MainActor.run {
-            NotificationCenter.default.post(
-                name: .activityUnreadChanged,
-                object: nil,
-                userInfo: ["count": n]
-            )
-        }
-    }
-
     // MARK: - Deletion (section-aware)
 
     private func deleteRowsInSection(dayKey: String, offsets: IndexSet) {
@@ -159,7 +179,8 @@ struct ActivityAllView: View {
             for id in idsToDelete {
                 try? await ActivityService.delete(id: id)
             }
-            await recalcAndBroadcastUnread()
+            // Let Home recompute its badge (it will refetch count)
+            NotificationCenter.default.post(name: .activityUnreadChanged, object: nil)
         }
     }
 
@@ -208,26 +229,92 @@ struct ActivityAllView: View {
         }
     }
 
+    // New activity row layout: Left = client name + invoice number, Right = event badge + relative time
     @ViewBuilder
     private func activityRowCell(_ row: ActivityJoined) -> some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(colors: [.indigo.opacity(0.2), .blue.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 36, height: 36)
-                Image(systemName: icon(for: row.event))
-                    .foregroundStyle(.blue)
-            }
+            // Left icon (unchanged)
+            ZstackIcon(row.event)
+
+            // LEFT: Client name + invoice number
             VStack(alignment: .leading, spacing: 4) {
-                Text(title(for: row))
+                Text(row.clientName.isEmpty || row.clientName == "—" ? "Client" : row.clientName)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
-                Text(relativeTime(row.created_at))
+                Text(row.invoiceNumber)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Spacer()
+
+            // RIGHT: Event type badge + relative time
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(eventLabel(for: row.event))
+                    .font(.caption2.weight(.bold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule().fill(eventColor(for: row.event).opacity(0.15))
+                    )
+                    .foregroundStyle(eventColor(for: row.event))
+
+                Text(relativeTime(row.created_at))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Unread indicator dot
+            if row.isUnread {
+                Circle()
+                    .fill(Color.blue)
+                    .frame(width: 8, height: 8)
+                    .accessibilityLabel("Unread")
+            }
         }
-        
+        .contentShape(Rectangle())
+    }
+
+    // MARK: - Event helpers (badge label & color)
+    private func eventLabel(for event: String) -> String {
+        switch event {
+        case "created":  return "Created"
+        case "sent":     return "Sent"
+        case "opened":   return "Opened"
+        case "paid":     return "Paid"
+        case "archived": return "Archived"
+        case "deleted":  return "Deleted"
+        case "overdue":  return "Overdue"
+        case "due_soon": return "Due Soon"
+        default:           return event.capitalized
+        }
+    }
+
+    private func eventColor(for event: String) -> Color {
+        switch event {
+        case "created":  return .blue
+        case "sent":     return .purple
+        case "opened":   return .teal
+        case "paid":     return .green
+        case "archived": return .gray
+        case "deleted":  return .red
+        case "overdue":  return .orange
+        case "due_soon": return .yellow
+        default:           return .secondary
+        }
+    }
+
+    @ViewBuilder
+    private func ZstackIcon(_ event: String) -> some View {
+        ZStack {
+            Circle()
+                .fill(LinearGradient(colors: [.indigo.opacity(0.2), .blue.opacity(0.2)],
+                                     startPoint: .topLeading,
+                                     endPoint: .bottomTrailing))
+                .frame(width: 36, height: 36)
+            Image(systemName: icon(for: event))
+                .foregroundStyle(.blue)
+        }
     }
 
     // MARK: - Time helpers
