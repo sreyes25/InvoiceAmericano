@@ -91,14 +91,16 @@ struct NewInvoiceView: View {
 
     // Track if user manually changed due date, so defaults don't overwrite it later
     @State private var didUserChangeDueDate = false
+    
+    
 
     // Prevents saving 0-dollar invoices
     private var canSave: Bool {
         guard draft.client != nil else { return false }
-        return draft.total > 0 && draft.items.contains {
-            !$0.description.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty &&
-            $0.unitPrice > 0 &&
-            $0.quantity > 0
+        return draft.total > 0 && draft.items.contains { li in
+            let hasContent = !li.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                             !li.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return hasContent && li.unitPrice > 0 && li.quantity > 0
         }
     }
 
@@ -125,132 +127,62 @@ struct NewInvoiceView: View {
         return GeometryReader { geo in
             let containerHeight = geo.size.height
             Form {
-                // --- Client + Invoice Info ---
-                Section("Invoice") {
-                    // Client selector (opens half-sheet list)
-                    if let selected = draft.client {
-                        Button { showClientPicker = true } label: {
-                            SelectedClientCard(client: selected)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(lockClient || isLoadingClients)
-                        .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
-                    } else {
-                        Button { showClientPicker = true } label: {
-                            PlaceholderClientCard()
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(lockClient || isLoadingClients)
-                        .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
-                    }
-
-                    InvoiceDetailsCard(
+                // --- Header (Client + Details + Notes) grouped in one card ---
+                Section {
+                    TopInvoiceCard(
+                        selectedClient: draft.client,
+                        lockClient: lockClient,
+                        isLoading: isLoadingClients,
+                        onTapClient: { showClientPicker = true },
                         date: draft.dueDate,
                         invoiceNumber: draft.number,
                         taxPercent: draft.taxPercent,
                         taxAmount: draft.taxAmount,
-                        onTapDetails: { showDueDateSheet = true }
+                        onTapDetails: { showDueDateSheet = true },
+                        noteText: draft.notes,
+                        onTapNotes: { showDueDateSheet = true }
                     )
                     .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
+                } header: {
+                    Text("Invoice")
                 }
 
-                // --- Line Items ---
-                // MARK: - Items
-                Section("Items") {
-                    // If no items yet, show a friendly placeholder card that opens the picker
-                    if draft.items.isEmpty {
-                        PlaceholderItemCard {
+                // --- Items grouped in one card (Add button inside) ---
+                Section {
+                    ItemsGroupCard(
+                        items: $draft.items,
+                        expandedItemIDs: $expandedItemIDs,
+                        onAddTap: {
                             itemVM.title = ""
                             itemVM.description = ""
                             itemVM.quantity = 1
                             itemVM.unitPrice = 0
                             showItemPicker = true
                         }
-                        .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
-                    }
-
-                    // Line items (compact summary by default). Tap to expand and edit.
-                    ForEach(draft.items.indices, id: \.self) { i in
-                        let item = draft.items[i]
-                        if expandedItemIDs.contains(item.id) {
-                            // Full editor
-                            LineItemCard(
-                                title: $draft.items[i].title,
-                                description: $draft.items[i].description,
-                                quantity: $draft.items[i].quantity,
-                                unitPrice: $draft.items[i].unitPrice
-                            )
-                            .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
-                            .onTapGesture { expandedItemIDs.remove(item.id) }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    draft.items.remove(at: i)
-                                } label: { Label("Delete", systemImage: "trash") }
-                            }
-                            .swipeActions(edge: .leading) {
-                                Button {
-                                    let copy = LineItemDraft(title: item.title, description: item.description, quantity: item.quantity, unitPrice: item.unitPrice)
-                                    draft.items.insert(copy, at: min(i + 1, draft.items.count))
-                                } label: { Label("Duplicate", systemImage: "doc.on.doc") }
-                                .tint(.blue)
-                            }
-                        } else {
-                            // Compact summary row showing index badge, wrapped text, and trailing total
-                            LineItemSummaryCard(index: i + 1, item: $draft.items[i])
-                                .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
-                                .onTapGesture { expandedItemIDs.insert(item.id) }
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button(role: .destructive) { draft.items.remove(at: i) } label: { Label("Delete", systemImage: "trash") }
-                                }
-                                .swipeActions(edge: .leading) {
-                                    Button {
-                                        let copy = LineItemDraft(title: item.title, description: item.description, quantity: item.quantity, unitPrice: item.unitPrice)
-                                        draft.items.insert(copy, at: min(i + 1, draft.items.count))
-                                    } label: { Label("Duplicate", systemImage: "doc.on.doc") }
-                                    .tint(.blue)
-                                }
-                        }
-                    }
-                    .onMove { from, to in draft.items.move(fromOffsets: from, toOffset: to) }
-                    .onDelete { draft.items.remove(atOffsets: $0) }
-
-                    // Add item button
-                    AddItemCardButton {
-                        itemVM.title = ""
-                        itemVM.description = ""
-                        itemVM.quantity = 1
-                        itemVM.unitPrice = 0
-                        showItemPicker = true
-                    }
+                    )
                     .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
+                } header: {
+                    Text("Items")
                 }
 
-                // Notes quick access (no title section) — styled row with preview
+                // --- Totals grouped in one card with bold divider before Total ---
                 Section {
-                    NotesRow(noteText: draft.notes) {
-                        showDueDateSheet = true
-                    }
+                    TotalsCard(
+                        subTotal: draft.subTotal,
+                        taxAmount: draft.taxAmount,
+                        total: draft.total,
+                        currencyCode: draft.currency
+                    )
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear
+                                .preference(key: ViewYPreferenceKey.self,
+                                            value: proxy.frame(in: .named("formScroll")).minY)
+                        }
+                    )
                     .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
-                }
-
-                // --- Totals ---
-                Section("Totals") {
-                    Color.clear
-                        .frame(height: 1)
-                        .background(
-                            GeometryReader { proxy in
-                                Color.clear
-                                    .preference(key: ViewYPreferenceKey.self,
-                                                value: proxy.frame(in: .named("formScroll")).minY)
-                            }
-                        )
-                        .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: 0, trailing: UI.rowH))
-                    HStack { Text("Subtotal"); Spacer(); Text(currency(draft.subTotal, code: draft.currency)) }
-                        .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
-                    HStack { Text("Tax"); Spacer(); Text(currency(draft.taxAmount, code: draft.currency)) }
-                        .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
-                    HStack { Text("Total").bold(); Spacer(); Text(currency(draft.total, code: draft.currency)).bold() }
-                        .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
+                } header: {
+                    Text("Totals")
                 }
 
                 if let error {
@@ -279,8 +211,8 @@ struct NewInvoiceView: View {
             .safeAreaInset(edge: .bottom) {
                 HStack {
                     Text("Total")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.primary)
                     Spacer()
                     Text(currency(draft.total, code: draft.currency))
                         .font(.headline.weight(.semibold))
@@ -321,12 +253,16 @@ struct NewInvoiceView: View {
                 // Optional flag if you still want it
                 totalsOnScreen = distance <= fadeRange
             }
-            // Collapse any expanded item editors when the user starts dragging/scrolling
+            // Collapse any expanded item editors only after a deliberate drag end with threshold
             .simultaneousGesture(
-                DragGesture(minimumDistance: 8)
-                    .onChanged { _ in
-                        if !expandedItemIDs.isEmpty {
-                            expandedItemIDs.removeAll()
+                DragGesture(minimumDistance: 12)
+                    .onEnded { value in
+                        let dx = abs(value.translation.width)
+                        let dy = abs(value.translation.height)
+                        if max(dx, dy) > 24 {
+                            if !expandedItemIDs.isEmpty {
+                                expandedItemIDs.removeAll()
+                            }
                         }
                     }
             )
@@ -480,6 +416,7 @@ private struct LineItemCard: View {
     @Binding var description: String
     @Binding var quantity: Int
     @Binding var unitPrice: Double
+    var hideQuantityControls: Bool = false
 
     @FocusState private var focusedField: Field?
     enum Field { case title, desc, price }
@@ -502,6 +439,7 @@ private struct LineItemCard: View {
                 .textInputAutocapitalization(.words)
                 .focused($focusedField, equals: .title)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
 
             // Description
             TextField("Describe the work (optional)", text: $description, axis: .vertical)
@@ -509,62 +447,65 @@ private struct LineItemCard: View {
                 .textInputAutocapitalization(.sentences)
                 .focused($focusedField, equals: .desc)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
 
-            // Quantity and pricing layout
-            VStack(alignment: .leading, spacing: 10) {
-                if quantity > 1 {
-                    HStack(spacing: 0) {
-                        Button { quantity = max(1, quantity - 1) } label: {
-                            Image(systemName: "minus")
-                                .frame(width: 34, height: 34)
+            // Quantity / price UI is shown only when not in "description-only" mode
+            if !hideQuantityControls {
+                VStack(alignment: .leading, spacing: 10) {
+                    if quantity > 1 {
+                        HStack(spacing: 0) {
+                            Button { quantity = max(1, quantity - 1) } label: {
+                                Image(systemName: "minus")
+                                    .frame(width: 34, height: 34)
+                            }
+                            .buttonStyle(.bordered)
+
+                            Text("\(quantity)")
+                                .font(.headline)
+                                .frame(minWidth: 38)
+
+                            Button { quantity = min(999, quantity + 1) } label: {
+                                Image(systemName: "plus")
+                                    .frame(width: 34, height: 34)
+                            }
+                            .buttonStyle(.bordered)
+
+                            Spacer(minLength: 8)
+
+                            // Unit price editor (compact, trailing aligned)
+                            TextField("Unit price", value: $unitPrice, formatter: Self.currencyFormatter)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 140)
+                                .focused($focusedField, equals: .price)
+                                .toolbar { keyboardToolbar }
                         }
-                        .buttonStyle(.bordered)
-
-                        Text("\(quantity)")
-                            .font(.headline)
-                            .frame(minWidth: 38)
-
-                        Button { quantity = min(999, quantity + 1) } label: {
-                            Image(systemName: "plus")
-                                .frame(width: 34, height: 34)
+                    } else {
+                        HStack {
+                            Spacer()
+                            TextField("Price", value: $unitPrice, formatter: Self.currencyFormatter)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 180, alignment: .trailing)
+                                .focused($focusedField, equals: .price)
+                                .toolbar { keyboardToolbar }
                         }
-                        .buttonStyle(.bordered)
-
-                        Spacer(minLength: 8)
-
-                        // Unit price editor (compact, trailing aligned)
-                        TextField("Unit price", value: $unitPrice, formatter: Self.currencyFormatter)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 140)
-                            .focused($focusedField, equals: .price)
-                            .toolbar { keyboardToolbar }
+                        Button("Add quantity") { quantity = 2 }
+                            .font(.caption)
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 2)
+                            .padding(.leading, 2)
                     }
-                } else {
+                    // Line total on a separate trailing row
                     HStack {
                         Spacer()
-                        TextField("Price", value: $unitPrice, formatter: Self.currencyFormatter)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 180, alignment: .trailing)
-                            .focused($focusedField, equals: .price)
-                            .toolbar { keyboardToolbar }
+                        Text(lineTotal, format: .currency(code: "USD"))
+                            .font(.headline)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .frame(minWidth: 96, alignment: .trailing)
                     }
-                    Button("Add quantity") { quantity = 2 }
-                        .font(.caption)
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 2)
-                        .padding(.leading, 2)
-                }
-                // Line total on a separate trailing row
-                HStack {
-                    Spacer()
-                    Text(lineTotal, format: .currency(code: "USD"))
-                        .font(.headline)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .frame(minWidth: 96, alignment: .trailing)
                 }
             }
         }
@@ -592,8 +533,36 @@ private struct LineItemCard: View {
 private struct LineItemSummaryCard: View {
     let index: Int
     @Binding var item: LineItemDraft
+    var onTapTextArea: (() -> Void)? = nil
+    var onTapPriceArea: (() -> Void)? = nil
 
     private var lineTotal: Double { Double(max(1, item.quantity)) * max(0, item.unitPrice) }
+
+    // Treat a very short description (<= 3 words and <= 24 chars) as a "title-like" label
+    private var isShortDescription: Bool {
+        let trimmed = item.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let words = trimmed.split(whereSeparator: { $0.isWhitespace })
+        return words.count <= 3 && trimmed.count <= 24
+    }
+
+    // Unified display decision:
+    // 1) If title exists -> use it (and show description only if not "short")
+    // 2) If no title and short description -> promote description into title slot
+    // 3) Else -> show description as normal body
+    private var promotedTitle: String? {
+        let t = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty { return t }
+        if isShortDescription { return item.description.trimmingCharacters(in: .whitespacesAndNewlines) }
+        return nil
+    }
+
+    private var shouldShowBodyDescription: Bool {
+        let d = item.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !d.isEmpty else { return false }
+        // If we promoted the description to title, don't render it again as body text.
+        return !(promotedTitle != nil && d == promotedTitle)
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -603,11 +572,13 @@ private struct LineItemSummaryCard: View {
                 .frame(width: 22, alignment: .trailing)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(item.title.isEmpty ? "Untitled" : item.title)
-                    .font(.headline)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if let headline = promotedTitle {
+                    Text(headline)
+                        .font(.headline)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if shouldShowBodyDescription {
                     Text(item.description)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -615,6 +586,8 @@ private struct LineItemSummaryCard: View {
                         .lineLimit(3)
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture { onTapTextArea?() }
 
             Spacer(minLength: 8)
 
@@ -623,6 +596,8 @@ private struct LineItemSummaryCard: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .frame(minWidth: 96, alignment: .trailing)
+                .contentShape(Rectangle())
+                .onTapGesture { onTapPriceArea?() }
         }
         .padding(14)
         .background(
@@ -1159,17 +1134,23 @@ private struct ItemPickerSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        var toAdd = LineItemDraft(
+                        let toAdd = LineItemDraft(
                             title: viewModel.title.trimmingCharacters(in: .whitespacesAndNewlines),
                             description: viewModel.description,
                             quantity: viewModel.quantity,
                             unitPrice: viewModel.unitPrice
                         )
-                        guard !toAdd.title.isEmpty else { return }
+                        let hasContent = !toAdd.title.isEmpty ||
+                                         !toAdd.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        guard hasContent else { return }
                         guard toAdd.unitPrice > 0 else { return }
                         onAdd(toAdd)
                     }
-                    .disabled(viewModel.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.unitPrice <= 0)
+                    .disabled(
+                        (viewModel.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                         viewModel.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        || viewModel.unitPrice <= 0
+                    )
                 }
             }
         }
@@ -1196,6 +1177,7 @@ private struct FloatingField: View {
                 .padding(.top, 14)
                 .padding(.horizontal, 12)
                 .focused($focused)
+                .textSelection(.enabled)
 
             if focused || !text.isEmpty {
                 Text(title)
@@ -1237,6 +1219,7 @@ private struct FloatingMultilineField: View {
                     .frame(minHeight: minHeight)
                     .padding(10)
                     .scrollContentBackground(.hidden)
+                    .textSelection(.enabled)
 
                 if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(placeholder)
@@ -1262,52 +1245,71 @@ private struct ItemPreviewCard: View {
     @FocusState private var focusedField: Field?
     enum Field { case title, desc, price }
 
-    @State private var showDescEditor = false
-    @State private var descDraft: String = ""
+    @State private var isTitleOpen = false
+    @State private var isDescOpen  = false
+
+    private func isBlank(_ s: String) -> Bool {
+        s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // ITEM NAME — floating label field
-            FloatingField(title: "Item", placeholder: "Title", text: $title)
-
-            // DESCRIPTION — open a modal editor from a full-width button
-            Button {
-                descDraft = description
-                showDescEditor = true
-            } label: {
-                HStack {
-                    Image(systemName: "square.and.pencil")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    Text(description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add description" : String(description.prefix(60)))
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Spacer()
+            // TITLE — collapsible button → field
+            if isTitleOpen {
+                FloatingField(title: "Item", placeholder: "Title (optional)", text: $title)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            } else {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { isTitleOpen = true }
+                } label: {
+                    HStack {
+                        Image(systemName: "text.cursor")
+                            .font(.headline)
+                        Text(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add title" : String(title.prefix(60)))
+                            .font(.headline)
+                            .lineLimit(1)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 12)
+                    .frame(maxWidth: .infinity)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(.tint.opacity(0.12)))
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(.tint)
-                        .animation(.easeInOut(duration: 0.25), value: UUID())
-                )
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-            .sheet(isPresented: $showDescEditor) {
-                NavigationStack {
-                    VStack {
-                        TextEditor(text: $descDraft)
-                            .padding(12)
-                            .scrollContentBackground(.hidden)
+
+            // DESCRIPTION — collapsible button → multiline editor (no sheet)
+            if isDescOpen {
+                FloatingMultilineField(
+                    title: "Description",
+                    placeholder: "Describe the work (optional)",
+                    text: $description,
+                    minHeight: 120
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+            } else {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { isDescOpen = true }
+                } label: {
+                    HStack {
+                        Image(systemName: "square.and.pencil")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                        Text(description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add description" : String(description.prefix(60)))
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Spacer()
                     }
-                    .navigationTitle("Description")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showDescEditor = false } }
-                        ToolbarItem(placement: .confirmationAction) { Button("Done") { description = descDraft; showDescEditor = false } }
-                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.tint)
+                            .animation(.easeInOut(duration: 0.25), value: UUID())
+                    )
                 }
+                .buttonStyle(.plain)
             }
 
             // PRICE — only show when quantity > 1 (per-unit editor lives inside the card)
@@ -1410,6 +1412,12 @@ private struct ItemPreviewCard: View {
                 .strokeBorder(Color.black.opacity(0.06))
         )
         .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 16).onEnded { _ in
+                if isBlank(title) { withAnimation(.easeInOut(duration: 0.2)) { isTitleOpen = false } }
+                if isBlank(description) { withAnimation(.easeInOut(duration: 0.2)) { isDescOpen  = false } }
+            }
+        )
     }
 
     // Small “calculator-ish” keyboard toolbar
@@ -1458,5 +1466,477 @@ private struct AddItemCardButton: View {
         .buttonStyle(.plain)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityLabel(Text("Add item"))
+    }
+}
+
+// Groups Client + Invoice Details + Notes into a single white card container
+private struct TopInvoiceCard: View {
+    let selectedClient: ClientRow?
+    let lockClient: Bool
+    let isLoading: Bool
+    var onTapClient: () -> Void
+
+    let date: Date
+    let invoiceNumber: String
+    let taxPercent: Double
+    let taxAmount: Double
+    var onTapDetails: () -> Void
+
+    let noteText: String
+    var onTapNotes: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Button(action: onTapClient) {
+                if let selected = selectedClient {
+                    SelectedClientCard(client: selected)
+                } else {
+                    PlaceholderClientCard()
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(lockClient || isLoading)
+
+            InvoiceDetailsCard(
+                date: date,
+                invoiceNumber: invoiceNumber,
+                taxPercent: taxPercent,
+                taxAmount: taxAmount,
+                onTapDetails: onTapDetails
+            )
+
+            // Notes preview row (tapping opens details sheet to edit notes)
+            NotesRow(noteText: noteText, onTap: onTapNotes)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.systemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.06))
+        )
+    }
+}
+
+// A reusable swipe-to-delete row that works inside VStacks (not only List rows).
+private struct SwipeableItemRow<Content: View>: View {
+    @State private var offsetX: CGFloat = 0          // resting offset of the row
+    @GestureState private var dragX: CGFloat = 0     // live drag translation
+    let revealWidth: CGFloat = 96                    // how far the row moves to reveal the button
+    let isEnabled: Bool
+    let highlight: Bool
+    let onDeleteTap: () -> Void
+    @ViewBuilder var content: () -> Content
+
+    init(isEnabled: Bool = true, highlight: Bool = false, onDeleteTap: @escaping () -> Void, @ViewBuilder content: @escaping () -> Content) {
+        self.isEnabled = isEnabled
+        self.highlight = highlight
+        self.onDeleteTap = onDeleteTap
+        self.content = content
+    }
+
+    var body: some View {
+        ZStack {
+            // Highlight background (underlying highlight layer)
+            if highlight {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.red.opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.red.opacity(0.75), lineWidth: 1)
+                    )
+            }
+            // Red destructive pill behind the row
+            HStack {
+                Spacer()
+                Button(role: .destructive, action: onDeleteTap) {
+                    Label("Delete", systemImage: "trash")
+                        .labelStyle(.titleAndIcon)
+                        .font(.subheadline.weight(.semibold))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(Color.red))
+                .foregroundStyle(.white)
+                .padding(.trailing, 8)
+            }
+            .opacity(isEnabled ? 1 : 0)
+            // Foreground content that slides
+            content()
+                .offset(x: offsetX + dragX)
+                .gesture(
+                    DragGesture(minimumDistance: 10, coordinateSpace: .local)
+                        .updating($dragX) { value, state, _ in
+                            guard isEnabled else { return }
+                            // only allow left-swipe to reveal
+                            state = min(0, value.translation.width)
+                        }
+                        .onEnded { value in
+                            guard isEnabled else { return }
+                            let total = offsetX + value.translation.width
+                            if total < -revealWidth * 0.66 {
+                                // Snap open
+                                withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                                    offsetX = -revealWidth
+                                }
+                            } else {
+                                // Close
+                                withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                                    offsetX = 0
+                                }
+                            }
+                        }
+                )
+                .onTapGesture {
+                    // If open and tapped, close it.
+                    if offsetX != 0 {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) { offsetX = 0 }
+                    }
+                }
+                .onChange(of: isEnabled) { _, enabled in
+                    if !enabled {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) { offsetX = 0 }
+                    }
+                }
+        }
+    }
+}
+
+// Groups all item rows in a single white card and keeps the Add button inside
+private struct ItemsGroupCard: View {
+    @Binding var items: [LineItemDraft]
+    @Binding var expandedItemIDs: Set<UUID>
+    var onAddTap: () -> Void
+
+    @State private var actionItemID: UUID? = nil
+    @State private var descriptionOnlyIDs: Set<UUID> = []
+    private enum ActionMode { case descQty, priceQty }
+    @State private var actionMode: ActionMode = .descQty
+    @State private var pendingDeleteID: UUID? = nil
+    @State private var priceDraft: [UUID: String] = [:]
+
+    private func unformattedString(from value: Double) -> String {
+        let v = max(0, value)
+        if v.rounded(.towardZero) == v {
+            return String(Int(v))
+        } else {
+            return String(format: "%.2f", v)
+        }
+    }
+    private func parsePrice(_ s: String) -> Double? {
+        let cleaned = s.filter { ("0"..."9").contains($0) || $0 == "." }
+        return Double(cleaned)
+    }
+    private func openAction(for id: UUID, mode: ActionMode) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            actionItemID = id
+            actionMode = mode
+            expandedItemIDs.removeAll()
+            descriptionOnlyIDs.removeAll()
+            pendingDeleteID = nil
+        }
+    }
+    private func closeAction(commit: Bool) {
+        guard let id = actionItemID else { return }
+        if commit, actionMode == .priceQty, let s = priceDraft[id], let v = parsePrice(s),
+           let idx = items.firstIndex(where: { $0.id == id }) {
+            items[idx].unitPrice = v
+        }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            actionItemID = nil
+        }
+    }
+
+    var body: some View {
+        let content = VStack(spacing: 10) {
+            if items.isEmpty {
+                PlaceholderItemCard { onAddTap() }
+            } else {
+                ForEach(items.indices, id: \.self) { i in
+                    let item = items[i]
+                    let isEditingThis = (actionItemID == item.id) || expandedItemIDs.contains(item.id)
+                    let highlightThis = (pendingDeleteID == item.id)
+
+                    ZStack {
+                        SwipeableItemRow(
+                            isEnabled: !isEditingThis,
+                            highlight: highlightThis,
+                            onDeleteTap: {
+                                pendingDeleteID = item.id
+                                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                            }
+                        ) {
+                            VStack(spacing: 6) {
+                                // Summary row
+                                LineItemSummaryCard(
+                                    index: i + 1,
+                                    item: $items[i],
+                                    onTapTextArea: {
+                                        if actionItemID == item.id && actionMode == .descQty {
+                                            closeAction(commit: true)
+                                        } else {
+                                            openAction(for: item.id, mode: .descQty)
+                                        }
+                                    },
+                                    onTapPriceArea: {
+                                        if actionItemID == item.id && actionMode == .priceQty {
+                                            closeAction(commit: true)
+                                        } else {
+                                            priceDraft[item.id] = priceDraft[item.id] ?? unformattedString(from: items[i].unitPrice)
+                                            openAction(for: item.id, mode: .priceQty)
+                                        }
+                                    }
+                                )
+                                .onLongPressGesture(minimumDuration: 0.6) {
+                                    pendingDeleteID = item.id
+                                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                                }
+
+                                // Inline action strip
+                                if actionItemID == item.id {
+                                    switch actionMode {
+                                    case .descQty:
+                                        HStack(spacing: 10) {
+                                            Button {
+                                                withAnimation(.easeInOut(duration: 0.2)) {
+                                                    actionItemID = nil
+                                                    expandedItemIDs = [item.id]
+                                                    descriptionOnlyIDs = [item.id]
+                                                }
+                                            } label: {
+                                                HStack(spacing: 8) {
+                                                    Image(systemName: "square.and.pencil")
+                                                        .font(.body.weight(.semibold))
+                                                    Text("Description")
+                                                        .font(.subheadline.weight(.semibold))
+                                                    Spacer(minLength: 0)
+                                                }
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 10)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                        .fill(.thinMaterial)
+                                                )
+                                            }
+                                            .buttonStyle(.plain)
+                                            .frame(maxWidth: .infinity)
+
+                                            HStack(spacing: 12) {
+                                                Button {
+                                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                                        items[i].quantity = max(1, items[i].quantity - 1)
+                                                    }
+                                                } label: { Image(systemName: "minus").font(.body.weight(.semibold)) }
+                                                .buttonStyle(.plain)
+
+                                                Text("\(max(1, items[i].quantity))×")
+                                                    .font(.subheadline.weight(.semibold))
+                                                    .monospacedDigit()
+
+                                                Button {
+                                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                                        items[i].quantity = min(999, items[i].quantity + 1)
+                                                    }
+                                                } label: { Image(systemName: "plus").font(.body.weight(.semibold)) }
+                                                .buttonStyle(.plain)
+                                            }
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 10)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                    .fill(Color.blue.opacity(0.12))
+                                            )
+                                            .fixedSize(horizontal: true, vertical: false)
+                                        }
+                                        .transition(.move(edge: .top).combined(with: .opacity))
+
+                                    case .priceQty:
+                                        HStack(spacing: 10) {
+                                            HStack(spacing: 8) {
+                                                Image(systemName: "dollarsign")
+                                                    .font(.body.weight(.semibold))
+                                                TextField("0.00", text: Binding(
+                                                    get: { priceDraft[item.id] ?? unformattedString(from: items[i].unitPrice) },
+                                                    set: { newVal in
+                                                        priceDraft[item.id] = newVal
+                                                    }
+                                                ))
+                                                .keyboardType(.decimalPad)
+                                                .multilineTextAlignment(.trailing)
+                                                .onAppear {
+                                                    priceDraft[item.id] = unformattedString(from: items[i].unitPrice)
+                                                }
+                                                .onSubmit {
+                                                    if let s = priceDraft[item.id], let v = parsePrice(s) {
+                                                        items[i].unitPrice = v
+                                                    }
+                                                    closeAction(commit: false)
+                                                }
+                                            }
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 10)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                    .fill(.thinMaterial)
+                                            )
+                                            .frame(maxWidth: .infinity)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture { } // keep taps local so the container tap-to-close doesn't fire
+
+                                            HStack(spacing: 12) {
+                                                Button {
+                                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                                        items[i].quantity = max(1, items[i].quantity - 1)
+                                                    }
+                                                } label: { Image(systemName: "minus").font(.body.weight(.semibold)) }
+                                                .buttonStyle(.plain)
+
+                                                Text("\(max(1, items[i].quantity))×")
+                                                    .font(.subheadline.weight(.semibold))
+                                                    .monospacedDigit()
+
+                                                Button {
+                                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                                        items[i].quantity = min(999, items[i].quantity + 1)
+                                                    }
+                                                } label: { Image(systemName: "plus").font(.body.weight(.semibold)) }
+                                                .buttonStyle(.plain)
+                                            }
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 10)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                                    .fill(Color.blue.opacity(0.12))
+                                            )
+                                            .fixedSize(horizontal: true, vertical: false)
+                                        }
+                                        .transition(.move(edge: .top).combined(with: .opacity))
+                                    }
+                                }
+
+                                // Full inline editor (when expanded explicitly)
+                                if expandedItemIDs.contains(item.id) {
+                                    LineItemCard(
+                                        title: $items[i].title,
+                                        description: $items[i].description,
+                                        quantity: $items[i].quantity,
+                                        unitPrice: $items[i].unitPrice,
+                                        hideQuantityControls: descriptionOnlyIDs.contains(item.id)
+                                    )
+                                    .transition(.move(edge: .top).combined(with: .opacity))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Add button
+            AddItemCardButton(onTap: onAddTap)
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
+                .onEnded { value in
+                    let dx = abs(value.translation.width)
+                    let dy = abs(value.translation.height)
+                    if max(dx, dy) > 24 {
+                        if actionItemID != nil {
+                            closeAction(commit: true)
+                        }
+                        descriptionOnlyIDs.removeAll()
+                        pendingDeleteID = nil
+                    }
+                }
+        )
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.systemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.06))
+        )
+
+        // Attach dialog to the whole card content (ensures it's on a View instance, not the type)
+        return content
+            .contentShape(Rectangle())
+            .onTapGesture {
+                closeAction(commit: true)
+            }
+            .confirmationDialog(
+                "Delete item?",
+                isPresented: Binding(
+                    get: { pendingDeleteID != nil },
+                    set: { if !$0 { pendingDeleteID = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    if let id = pendingDeleteID,
+                       let idx = items.firstIndex(where: { $0.id == id }) {
+                        items.remove(at: idx)
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    }
+                    pendingDeleteID = nil
+                }
+                Button("Cancel", role: .cancel) { pendingDeleteID = nil }
+            } message: {
+                let title = items.first(where: { $0.id == pendingDeleteID })?.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                Text("“\((title?.isEmpty == false ? title! : "Item"))” will be removed from this invoice.")
+            }
+    }
+}
+
+private struct TotalsCard: View {
+    let subTotal: Double
+    let taxAmount: Double
+    let total: Double
+    let currencyCode: String
+
+    private func currency(_ v: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = currencyCode.uppercased()
+        return f.string(from: NSNumber(value: v)) ?? "\(v)"
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            row("Subtotal", currency(subTotal))
+            Divider().padding(.horizontal, 14)
+            row("Tax", currency(taxAmount))
+            // Bold divider before Total
+            Rectangle()
+                .fill(Color.black.opacity(0.12))
+                .frame(height: 2)
+                .padding(.top, 8)
+                .padding(.horizontal, 14)
+            row("Total", currency(total), isBold: true)
+                .padding(.bottom, 6)
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.systemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.06))
+        )
+    }
+
+    @ViewBuilder
+    private func row(_ title: String, _ value: String, isBold: Bool = false) -> some View {
+        HStack {
+            Text(title).font(isBold ? .headline.weight(.semibold) : .body)
+            Spacer()
+            Text(value).font(isBold ? .headline.weight(.semibold) : .body)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 }
