@@ -91,8 +91,6 @@ struct NewInvoiceView: View {
 
     // Track if user manually changed due date, so defaults don't overwrite it later
     @State private var didUserChangeDueDate = false
-    
-    
 
     // Prevents saving 0-dollar invoices
     private var canSave: Bool {
@@ -569,7 +567,8 @@ private struct LineItemSummaryCard: View {
             Text("\(index)")
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 22, alignment: .trailing)
+                .frame(width: 22, alignment: .leading)
+                .padding(.leading, 4)
 
             VStack(alignment: .leading, spacing: 6) {
                 if let headline = promotedTitle {
@@ -1522,18 +1521,27 @@ private struct TopInvoiceCard: View {
 
 // A reusable swipe-to-delete row that works inside VStacks (not only List rows).
 private struct SwipeableItemRow<Content: View>: View {
-    @State private var offsetX: CGFloat = 0          // resting offset of the row
-    @GestureState private var dragX: CGFloat = 0     // live drag translation
+    @State private var offsetX: CGFloat = 0          // current drag offset of the row
     let revealWidth: CGFloat = 96                    // how far the row moves to reveal the button
+    let swipeToEndThreshold: CGFloat = 220           // how far left counts as a full delete swipe
+
     let isEnabled: Bool
     let highlight: Bool
-    let onDeleteTap: () -> Void
+    let onDeleteTap: () -> Void                      // called when the red Delete button is tapped
+    let onSwipeToEnd: (() -> Void)?                  // called when user swipes far enough left to auto-delete
     @ViewBuilder var content: () -> Content
 
-    init(isEnabled: Bool = true, highlight: Bool = false, onDeleteTap: @escaping () -> Void, @ViewBuilder content: @escaping () -> Content) {
+    init(
+        isEnabled: Bool = true,
+        highlight: Bool = false,
+        onDeleteTap: @escaping () -> Void,
+        onSwipeToEnd: (() -> Void)? = nil,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
         self.isEnabled = isEnabled
         self.highlight = highlight
         self.onDeleteTap = onDeleteTap
+        self.onSwipeToEnd = onSwipeToEnd
         self.content = content
     }
 
@@ -1565,32 +1573,38 @@ private struct SwipeableItemRow<Content: View>: View {
             .opacity(isEnabled ? 1 : 0)
             // Foreground content that slides
             content()
-                .offset(x: offsetX + dragX)
+                .offset(x: offsetX)
                 .gesture(
                     DragGesture(minimumDistance: 10, coordinateSpace: .local)
-                        .updating($dragX) { value, state, _ in
+                        .onChanged { value in
                             guard isEnabled else { return }
-                            // only allow left-swipe to reveal
-                            state = min(0, value.translation.width)
-                        }
-                        .onEnded { value in
-                            guard isEnabled else { return }
-                            let total = offsetX + value.translation.width
-                            if total < -revealWidth * 0.66 {
-                                // Snap open
-                                withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-                                    offsetX = -revealWidth
-                                }
+                            let translation = value.translation.width
+                            if translation < 0 {
+                                // Allow the row to be dragged past the reveal width so the user can swipe it off-screen
+                                offsetX = translation
                             } else {
-                                // Close
-                                withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
-                                    offsetX = 0
-                                }
+                                // Swiping right: do not allow positive offset
+                                offsetX = 0
+                            }
+                        }
+                        .onEnded { _ in
+                            guard isEnabled else { return }
+
+                            // First, if the row was dragged far enough, treat it as a full swipe-to-delete.
+                            if let swipeToEnd = onSwipeToEnd, offsetX < -swipeToEndThreshold {
+                                swipeToEnd()
+                                return
+                            }
+
+                            // Otherwise, snap to either the revealed state or back closed.
+                            let shouldOpen = offsetX < -revealWidth * 0.5
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                                offsetX = shouldOpen ? -revealWidth : 0
                             }
                         }
                 )
                 .onTapGesture {
-                    // If open and tapped, close it.
+                    // If open and tapped, close it (when hit-testing is enabled)
                     if offsetX != 0 {
                         withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) { offsetX = 0 }
                     }
@@ -1615,7 +1629,9 @@ private struct ItemsGroupCard: View {
     private enum ActionMode { case descQty, priceQty }
     @State private var actionMode: ActionMode = .descQty
     @State private var pendingDeleteID: UUID? = nil
+    @State private var showingDeleteDialog: Bool = false
     @State private var priceDraft: [UUID: String] = [:]
+    @State private var rowVersion: [UUID: Int] = [:]
 
     private func unformattedString(from value: Double) -> String {
         let v = max(0, value)
@@ -1648,6 +1664,9 @@ private struct ItemsGroupCard: View {
             actionItemID = nil
         }
     }
+    private func resetSwipe(for id: UUID) {
+        rowVersion[id, default: 0] += 1
+    }
 
     var body: some View {
         let content = VStack(spacing: 10) {
@@ -1664,8 +1683,20 @@ private struct ItemsGroupCard: View {
                             isEnabled: !isEditingThis,
                             highlight: highlightThis,
                             onDeleteTap: {
+                                // Tapping the red Delete pill shows the confirmation dialog
                                 pendingDeleteID = item.id
+                                showingDeleteDialog = true
                                 UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                            },
+                            onSwipeToEnd: {
+                                // Swiping the row far enough left auto-deletes the item without asking
+                                if let idx = items.firstIndex(where: { $0.id == item.id }) {
+                                    items.remove(at: idx)
+                                    actionItemID = nil
+                                    expandedItemIDs.remove(item.id)
+                                    descriptionOnlyIDs.remove(item.id)
+                                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                                }
                             }
                         ) {
                             VStack(spacing: 6) {
@@ -1689,10 +1720,6 @@ private struct ItemsGroupCard: View {
                                         }
                                     }
                                 )
-                                .onLongPressGesture(minimumDuration: 0.6) {
-                                    pendingDeleteID = item.id
-                                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
-                                }
 
                                 // Inline action strip
                                 if actionItemID == item.id {
@@ -1829,6 +1856,7 @@ private struct ItemsGroupCard: View {
                                 }
                             }
                         }
+                        .id("\(item.id.uuidString)-\(rowVersion[item.id, default: 0])")
                     }
                 }
             }
@@ -1868,10 +1896,7 @@ private struct ItemsGroupCard: View {
             }
             .confirmationDialog(
                 "Delete item?",
-                isPresented: Binding(
-                    get: { pendingDeleteID != nil },
-                    set: { if !$0 { pendingDeleteID = nil } }
-                ),
+                isPresented: $showingDeleteDialog,
                 titleVisibility: .visible
             ) {
                 Button("Delete", role: .destructive) {
@@ -1880,12 +1905,25 @@ private struct ItemsGroupCard: View {
                         items.remove(at: idx)
                         UINotificationFeedbackGenerator().notificationOccurred(.success)
                     }
+                    // Clear the pending ID before hiding; we don't need to reset swipe for a removed row
                     pendingDeleteID = nil
+                    showingDeleteDialog = false
                 }
-                Button("Cancel", role: .cancel) { pendingDeleteID = nil }
+                Button("Cancel", role: .cancel) {
+                    // Simply hide the dialog; onChange below will reset the swipe and clear the ID
+                    showingDeleteDialog = false
+                }
             } message: {
                 let title = items.first(where: { $0.id == pendingDeleteID })?.title.trimmingCharacters(in: .whitespacesAndNewlines)
                 Text("“\((title?.isEmpty == false ? title! : "Item"))” will be removed from this invoice.")
+            }
+            .onChange(of: showingDeleteDialog) { _, isPresented in
+                if !isPresented {
+                    if let id = pendingDeleteID {
+                        resetSwipe(for: id)
+                    }
+                    pendingDeleteID = nil
+                }
             }
     }
 }
