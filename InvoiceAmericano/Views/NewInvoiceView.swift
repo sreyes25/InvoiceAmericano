@@ -1522,8 +1522,8 @@ private struct TopInvoiceCard: View {
 // A reusable swipe-to-delete row that works inside VStacks (not only List rows).
 private struct SwipeableItemRow<Content: View>: View {
     @State private var offsetX: CGFloat = 0          // current drag offset of the row
-    let revealWidth: CGFloat = 96                    // how far the row moves to reveal the button
-    let swipeToEndThreshold: CGFloat = 220           // how far left counts as a full delete swipe
+    let revealWidth: CGFloat                         // how far the row moves to reveal the button
+    let swipeToEndThreshold: CGFloat                 // threshold distance for full swipe-to-delete
 
     let isEnabled: Bool
     let highlight: Bool
@@ -1534,12 +1534,15 @@ private struct SwipeableItemRow<Content: View>: View {
     init(
         isEnabled: Bool = true,
         highlight: Bool = false,
+        revealWidth: CGFloat = 96,
         onDeleteTap: @escaping () -> Void,
         onSwipeToEnd: (() -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.isEnabled = isEnabled
         self.highlight = highlight
+        self.revealWidth = revealWidth
+        self.swipeToEndThreshold = revealWidth * 2.5   // ~2.5x reveal width ≈ strong full-swipe gesture
         self.onDeleteTap = onDeleteTap
         self.onSwipeToEnd = onSwipeToEnd
         self.content = content
@@ -1563,14 +1566,23 @@ private struct SwipeableItemRow<Content: View>: View {
                     Label("Delete", systemImage: "trash")
                         .labelStyle(.titleAndIcon)
                         .font(.subheadline.weight(.semibold))
+                        .frame(minWidth: 80) // larger tap target
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(Capsule().fill(Color.red))
                 .foregroundStyle(.white)
                 .padding(.trailing, 8)
+                .contentShape(Rectangle()) // make the whole capsule area tappable
             }
             .opacity(isEnabled ? 1 : 0)
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    if isEnabled {
+                        onDeleteTap()
+                    }
+                }
+            )
             // Foreground content that slides
             content()
                 .offset(x: offsetX)
@@ -1628,8 +1640,6 @@ private struct ItemsGroupCard: View {
     @State private var descriptionOnlyIDs: Set<UUID> = []
     private enum ActionMode { case descQty, priceQty }
     @State private var actionMode: ActionMode = .descQty
-    @State private var pendingDeleteID: UUID? = nil
-    @State private var showingDeleteDialog: Bool = false
     @State private var priceDraft: [UUID: String] = [:]
     @State private var rowVersion: [UUID: Int] = [:]
 
@@ -1651,7 +1661,6 @@ private struct ItemsGroupCard: View {
             actionMode = mode
             expandedItemIDs.removeAll()
             descriptionOnlyIDs.removeAll()
-            pendingDeleteID = nil
         }
     }
     private func closeAction(commit: Bool) {
@@ -1667,6 +1676,19 @@ private struct ItemsGroupCard: View {
     private func resetSwipe(for id: UUID) {
         rowVersion[id, default: 0] += 1
     }
+    private func deleteItem(id: UUID) {
+        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+
+        _ = withAnimation(.spring(response: 0.25, dampingFraction: 0.9)) {
+            items.remove(at: idx)
+        }
+
+        if actionItemID == id {
+            actionItemID = nil
+        }
+        expandedItemIDs.remove(id)
+        descriptionOnlyIDs.remove(id)
+    }
 
     var body: some View {
         let content = VStack(spacing: 10) {
@@ -1676,27 +1698,19 @@ private struct ItemsGroupCard: View {
                 ForEach(items.indices, id: \.self) { i in
                     let item = items[i]
                     let isEditingThis = (actionItemID == item.id) || expandedItemIDs.contains(item.id)
-                    let highlightThis = (pendingDeleteID == item.id)
+                    let highlightThis = false
 
                     ZStack {
                         SwipeableItemRow(
                             isEnabled: !isEditingThis,
                             highlight: highlightThis,
                             onDeleteTap: {
-                                // Tapping the red Delete pill shows the confirmation dialog
-                                pendingDeleteID = item.id
-                                showingDeleteDialog = true
-                                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                                deleteItem(id: item.id)
+                                UINotificationFeedbackGenerator().notificationOccurred(.success)
                             },
                             onSwipeToEnd: {
-                                // Swiping the row far enough left auto-deletes the item without asking
-                                if let idx = items.firstIndex(where: { $0.id == item.id }) {
-                                    items.remove(at: idx)
-                                    actionItemID = nil
-                                    expandedItemIDs.remove(item.id)
-                                    descriptionOnlyIDs.remove(item.id)
-                                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                                }
+                                deleteItem(id: item.id)
+                                UINotificationFeedbackGenerator().notificationOccurred(.success)
                             }
                         ) {
                             VStack(spacing: 6) {
@@ -1869,12 +1883,19 @@ private struct ItemsGroupCard: View {
                 .onEnded { value in
                     let dx = abs(value.translation.width)
                     let dy = abs(value.translation.height)
-                    if max(dx, dy) > 24 {
+
+                    // Treat primarily vertical drags as "scroll" gestures:
+                    if dy > dx && dy > 24 {
+                        // Close any inline editors
                         if actionItemID != nil {
                             closeAction(commit: true)
                         }
                         descriptionOnlyIDs.removeAll()
-                        pendingDeleteID = nil
+
+                        // Also reset any swipe offsets so half‑swiped rows snap back
+                        for id in items.map(\.id) {
+                            resetSwipe(for: id)
+                        }
                     }
                 }
         )
@@ -1888,43 +1909,16 @@ private struct ItemsGroupCard: View {
                 .stroke(Color.black.opacity(0.06))
         )
 
-        // Attach dialog to the whole card content (ensures it's on a View instance, not the type)
         return content
             .contentShape(Rectangle())
-            .onTapGesture {
-                closeAction(commit: true)
-            }
-            .confirmationDialog(
-                "Delete item?",
-                isPresented: $showingDeleteDialog,
-                titleVisibility: .visible
-            ) {
-                Button("Delete", role: .destructive) {
-                    if let id = pendingDeleteID,
-                       let idx = items.firstIndex(where: { $0.id == id }) {
-                        items.remove(at: idx)
-                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    // Only close inline editors; do not interfere with swipe-delete
+                    if actionItemID != nil {
+                        closeAction(commit: true)
                     }
-                    // Clear the pending ID before hiding; we don't need to reset swipe for a removed row
-                    pendingDeleteID = nil
-                    showingDeleteDialog = false
                 }
-                Button("Cancel", role: .cancel) {
-                    // Simply hide the dialog; onChange below will reset the swipe and clear the ID
-                    showingDeleteDialog = false
-                }
-            } message: {
-                let title = items.first(where: { $0.id == pendingDeleteID })?.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                Text("“\((title?.isEmpty == false ? title! : "Item"))” will be removed from this invoice.")
-            }
-            .onChange(of: showingDeleteDialog) { _, isPresented in
-                if !isPresented {
-                    if let id = pendingDeleteID {
-                        resetSwipe(for: id)
-                    }
-                    pendingDeleteID = nil
-                }
-            }
+            )
     }
 }
 
