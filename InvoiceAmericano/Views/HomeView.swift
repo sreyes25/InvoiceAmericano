@@ -79,6 +79,8 @@ struct HomeView: View {
             .padding(.top, 12)
         }
         .navigationTitle("Home")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -91,10 +93,10 @@ struct HomeView: View {
 
         // ====== Sheets ======
 
-        // New invoice sheet
+        // New invoice sheet — match the NewInvoiceView glassy, centered title behavior
         .sheet(isPresented: $showNewInvoice) {
-            ThemedNewInvoiceSheet(
-                onSaved: { draft in
+            NavigationStack {
+                NewInvoiceView(onSaved: { draft in
                     Task {
                         do {
                             _ = try await InvoiceService.createInvoice(from: draft)
@@ -104,16 +106,10 @@ struct HomeView: View {
                             await MainActor.run { errorText = error.localizedDescription }
                         }
                     }
-                },
-                onClose: { showNewInvoice = false }
-            )
-            // Keep it tall and on-brand
-            .presentationDetents([.fraction(0.90), .large])   // lets users pull higher if needed
-            .presentationCornerRadius(28)
-            .presentationDragIndicator(.hidden)               // we draw our own
-            .presentationBackground(.ultraThinMaterial)       // subtle glass
+                })
+            }
         }
-
+        
         // Recent Invoices sheet
         .sheet(isPresented: $showInvoicesSheet) {
             NavigationStack {
@@ -130,7 +126,19 @@ struct HomeView: View {
                 .navigationDestination(for: UUID.self) { invoiceId in
                     InvoiceDetailView(invoiceId: invoiceId)
                 }
+                // Stable backdrop inside the sheet’s content
+                .background(Color(.systemBackground).ignoresSafeArea())
+                // Glassy, centered title like other sheets
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+                .navigationTitle("Recent Invoices")
             }
+            // Match the New Invoice sheet chrome
+            .presentationDetents([.fraction(0.92), .large])
+            .presentationCornerRadius(28)
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.clear)
+            .scrollDismissesKeyboard(.immediately)
         }
 
         // Recent Activity sheet
@@ -148,7 +156,17 @@ struct HomeView: View {
                 .navigationDestination(for: UUID.self) { invoiceId in
                     InvoiceDetailView(invoiceId: invoiceId)
                 }
+                // Stable backdrop + glassy bar to match other sheets
+                .background(Color(.systemBackground).ignoresSafeArea())
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+                .navigationTitle("Recent Activity")
             }
+            .presentationDetents([.fraction(0.92), .large])
+            .presentationCornerRadius(28)
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.clear)
+            .scrollDismissesKeyboard(.immediately)
         }
 
         // AI Assistant sheet
@@ -188,6 +206,10 @@ struct HomeView: View {
                 }
             }
         }
+        .navigationTitle("Home")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackgroundVisibility(.visible, for: .navigationBar)
     } // <-- close body
 
     // MARK: - Payments section (Stripe Connect)
@@ -2154,7 +2176,7 @@ private struct AIOuroborosBadge: View {
 
 // MARK: - Themed "New Invoice" Sheet
 
-private struct ThemedNewInvoiceSheet: View {
+struct ThemedNewInvoiceSheet: View {
     let onSaved: (InvoiceDraft) -> Void
     var onClose: (() -> Void)? = nil
 
@@ -2168,9 +2190,9 @@ private struct ThemedNewInvoiceSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Background glow that matches the tile
-                gradient.opacity(0.20)
-                    .ignoresSafeArea()
+                // Background: flatten to a single layer to prevent streaks
+                Color(.systemBackground).ignoresSafeArea()
+                gradient.opacity(0.08).blendMode(.overlay)
 
                 // Content card
                 VStack(spacing: 0) {
@@ -2180,32 +2202,13 @@ private struct ThemedNewInvoiceSheet: View {
                             .fill(.secondary.opacity(0.35))
                             .frame(width: 36, height: 5)
                             .padding(.top, 8)
-
-                        HStack {
-                            Label("New Invoice", systemImage: "plus.circle.fill")
-                                .font(.headline.bold())
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Button {
-                                onClose?()
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.headline)
-                                    .foregroundStyle(.secondary)
-                                    .padding(8)
-                                    .background(.ultraThinMaterial, in: Circle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
                     }
-                    .background(.ultraThinMaterial)
+                    // .background(.ultraThinMaterial) // Removed to prevent translucency streak
 
                     // Your invoice form
                     NewInvoiceView(onSaved: onSaved)
                         .scrollContentBackground(.hidden) // Form blends into our bg
-                        .background(Color.clear)
+                        // .background(Color.clear) // Removed to prevent translucency streak
                         .tint(.indigo) // controls buttons/links inside the form
                 }
                 .background(
@@ -2216,8 +2219,9 @@ private struct ThemedNewInvoiceSheet: View {
                         .ignoresSafeArea()
                 )
             }
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(.clear, for: .navigationBar)
+            .navigationTitle("New Invoice")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         }
     }
 }

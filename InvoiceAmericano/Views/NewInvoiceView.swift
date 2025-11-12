@@ -65,6 +65,33 @@ struct LineItemDraft: Identifiable, Hashable {
     var unitPrice: Double = 0
 }
 
+// A tiny shell so New-Invoice looks identical wherever it's presented
+struct NewInvoiceNavShell: View {
+    let onSaved: (InvoiceDraft) -> Void
+    let onClose: () -> Void
+    var preselectedClient: ClientRow? = nil
+    var lockClient: Bool = false
+
+    var body: some View {
+        NavigationStack {
+            NewInvoiceView(
+                preselectedClient: preselectedClient,
+                lockClient: lockClient,
+                onSaved: onSaved
+            )
+            // Prevent double-translucency re-blend on scroll
+            .background(Color(.systemBackground).ignoresSafeArea())
+            // Match the glassy, centered small title look
+            .navigationTitle("New Invoice")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            .toolbarBackgroundVisibility(.visible, for: .navigationBar)
+        }
+        // Keep the sheet chrome from fighting the nav bar
+        .presentationBackground(.clear)
+    }
+}
+
 struct NewInvoiceView: View {
     var preselectedClient: ClientRow? = nil
     var lockClient: Bool = false
@@ -140,7 +167,7 @@ struct NewInvoiceView: View {
                         noteText: draft.notes,
                         onTapNotes: { showDueDateSheet = true }
                     )
-                    .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
+                    .listRowBackground(Color.clear)
                 } header: {
                     Text("Invoice")
                 }
@@ -158,7 +185,7 @@ struct NewInvoiceView: View {
                             showItemPicker = true
                         }
                     )
-                    .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
+                    .listRowBackground(Color.clear)
                 } header: {
                     Text("Items")
                 }
@@ -179,6 +206,7 @@ struct NewInvoiceView: View {
                         }
                     )
                     .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
+                    .listRowBackground(Color.clear)
                 } header: {
                     Text("Totals")
                 }
@@ -187,6 +215,9 @@ struct NewInvoiceView: View {
                     Section { Text(error).foregroundStyle(.red) }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemBackground).ignoresSafeArea())
+            .listStyle(.plain)
             .navigationTitle("New Invoice")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -410,6 +441,7 @@ struct NewInvoiceView: View {
 
 // A friendlier card with item name, description, big qty buttons, currency field and per-line total
 private struct LineItemCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var title: String
     @Binding var description: String
     @Binding var quantity: Int
@@ -508,7 +540,14 @@ private struct LineItemCard: View {
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.black.opacity(colorScheme == .light ? 0.16 : 0.35))
+                )
+        )
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
@@ -529,6 +568,7 @@ private struct LineItemCard: View {
 
 // Compact summary row: shows just index badge, title/description (wrapped), and trailing total.
 private struct LineItemSummaryCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     let index: Int
     @Binding var item: LineItemDraft
     var onTapTextArea: (() -> Void)? = nil
@@ -605,7 +645,7 @@ private struct LineItemSummaryCard: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.black.opacity(0.05))
+                .strokeBorder(Color.black.opacity(colorScheme == .light ? 0.16 : 0.35))
         )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
@@ -614,13 +654,14 @@ private struct LineItemSummaryCard: View {
 
 // Placeholder card shown when no items exist yet
 private struct PlaceholderItemCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     var onTap: () -> Void
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
                 ZStack {
                     Circle().fill(LinearGradient(colors: [Color.blue.opacity(0.22), Color.indigo.opacity(0.18)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    Image(systemName: "tag").foregroundStyle(.blue)
+                    Image(systemName: "tag").foregroundStyle(.green)
                 }
                 .frame(width: 40, height: 40)
 
@@ -640,7 +681,7 @@ private struct PlaceholderItemCard: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.black.opacity(0.05))
+                    .strokeBorder(Color.black.opacity(colorScheme == .light ? 0.16 : 0.35))
             )
         }
         .buttonStyle(.plain)
@@ -652,6 +693,7 @@ private struct PlaceholderItemCard: View {
 
 // Compact selected client card (used in New Invoice header)
 private struct SelectedClientCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     let client: ClientRow
     var body: some View {
         HStack(spacing: 12) {
@@ -686,9 +728,13 @@ private struct SelectedClientCard: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.black.opacity(0.05))
+                .strokeBorder(Color.black.opacity(colorScheme == .light ? 0.16 : 0.35))
         )
-        .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
+        .shadow(
+            color: Color.black.opacity(colorScheme == .light ? 0.10 : 0.38),
+            radius: colorScheme == .light ? 8 : 10,
+            y: colorScheme == .light ? 4 : 6
+        )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("Client \(client.name)"))
@@ -705,6 +751,7 @@ private struct SelectedClientCard: View {
 // Placeholder card when no client selected
 // Placeholder card when no client selected — shows a default client preview
 private struct PlaceholderClientCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     var body: some View {
         HStack(spacing: 12) {
             // Avatar / initials bubble (CL for Client)
@@ -740,9 +787,13 @@ private struct PlaceholderClientCard: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.black.opacity(0.05))
+                .strokeBorder(Color.black.opacity(colorScheme == .light ? 0.16 : 0.35))
         )
-        .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
+        .shadow(
+            color: Color.black.opacity(colorScheme == .light ? 0.10 : 0.38),
+            radius: colorScheme == .light ? 8 : 10,
+            y: colorScheme == .light ? 4 : 6
+        )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("Default client placeholder. Tap to select a client."))
@@ -751,12 +802,13 @@ private struct PlaceholderClientCard: View {
 
 // Styled due date row card
 private struct DueDateRow: View {
+    @Environment(\.colorScheme) private var colorScheme
     let date: Date
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.15))
-                Image(systemName: "calendar").foregroundStyle(.blue)
+                RoundedRectangle(cornerRadius: 8).fill(Color.red.opacity(0.15))
+                Image(systemName: "calendar").foregroundStyle(.white)
             }
             .frame(width: 32, height: 32)
 
@@ -773,7 +825,7 @@ private struct DueDateRow: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.black.opacity(0.05))
+                .strokeBorder(Color.black.opacity(colorScheme == .light ? 0.16 : 0.35))
         )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityLabel(Text("Due date \(date.formatted(date: .abbreviated, time: .omitted))"))
@@ -783,6 +835,7 @@ private struct DueDateRow: View {
 
 // Combined card: Due date (left) + Invoice number (right)
 private struct InvoiceDetailsCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     let date: Date
     let invoiceNumber: String
     let taxPercent: Double
@@ -815,8 +868,8 @@ private struct InvoiceDetailsCard: View {
                     // LEFT: Due date label and value
                     HStack(spacing: 12) {
                         ZStack {
-                            RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.15))
-                            Image(systemName: "calendar").foregroundStyle(.blue)
+                            RoundedRectangle(cornerRadius: 8).fill(Color.red.opacity(0.9))
+                            Image(systemName: "calendar").foregroundStyle(.white)
                         }
                         .frame(width: 32, height: 32)
 
@@ -880,7 +933,7 @@ private struct InvoiceDetailsCard: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.black.opacity(0.05))
+                .strokeBorder(Color.black.opacity(colorScheme == .light ? 0.16 : 0.35))
         )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .ignore)
@@ -890,6 +943,7 @@ private struct InvoiceDetailsCard: View {
 
 // Compact, pretty "Notes" row that matches card styling and shows a preview
 private struct NotesRow: View {
+    @Environment(\.colorScheme) private var colorScheme
     let noteText: String
     var onTap: () -> Void
 
@@ -904,8 +958,8 @@ private struct NotesRow: View {
         Button(action: onTap) {
             HStack(spacing: 12) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.15))
-                    Image(systemName: "note.text").foregroundStyle(.blue)
+                    RoundedRectangle(cornerRadius: 8).fill(Color.yellow.opacity(0.85))
+                    Image(systemName: "note.text").foregroundStyle(.white)
                 }
                 .frame(width: 32, height: 32)
 
@@ -926,7 +980,7 @@ private struct NotesRow: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.black.opacity(0.05))
+                    .strokeBorder(Color.black.opacity(colorScheme == .light ? 0.16 : 0.35))
             )
         }
         .buttonStyle(.plain)
@@ -1039,6 +1093,7 @@ final class ItemDraftViewModel: ObservableObject {
 
 // MARK: - Item Picker (half-sheet) with live preview
 private struct ItemPickerSheet: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var viewModel: ItemDraftViewModel
     var currentItemIndex: Int
     var presets: [String]
@@ -1069,7 +1124,7 @@ private struct ItemPickerSheet: View {
                         quantity: $viewModel.quantity,
                         unitPrice: $viewModel.unitPrice
                     )
-                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                    .listRowBackground(Color(.systemBackground))
 
                     if viewModel.quantity > 1 {
                         // Read-only total when using quantity
@@ -1085,6 +1140,7 @@ private struct ItemPickerSheet: View {
                             Text("Price")
                                 .font(.footnote.weight(.semibold))
                                 .foregroundStyle(.secondary)
+
                             HStack(spacing: 12) {
                                 Spacer()
                                 TextField("0.00", value: $viewModel.unitPrice, formatter: ItemPickerSheet.currencyFormatter)
@@ -1093,15 +1149,18 @@ private struct ItemPickerSheet: View {
                                     .frame(width: 180, alignment: .trailing)
                             }
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 12)
+                            .padding(.vertical, 10)
                             .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.secondary.opacity(0.2))
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground))
-                                    )
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color(.systemBackground))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(Color.black.opacity(colorScheme == .light ? 0.12 : 0.35))
                             )
                         }
+                        .padding(.top, 0)
+                        .padding(.bottom, 2)
                     }
                 } header: {
                     Text("New item")
@@ -1235,6 +1294,7 @@ private struct FloatingMultilineField: View {
 
 // Compact editor used in the item picker to preview the item before adding (refined design)
 private struct ItemPreviewCard: View {
+    @Environment(\.colorScheme) private var colorScheme
     let index: Int   // kept for API compatibility, not rendered
     @Binding var title: String
     @Binding var description: String
@@ -1304,7 +1364,7 @@ private struct ItemPreviewCard: View {
                     .frame(maxWidth: .infinity)
                     .background(
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(.tint)
+                            .fill(Color.accentColor.opacity(0.8))
                             .animation(.easeInOut(duration: 0.25), value: UUID())
                     )
                 }
@@ -1357,7 +1417,7 @@ private struct ItemPreviewCard: View {
                     .frame(maxWidth: .infinity)
                     .background(
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(.tint)
+                            .fill(Color.accentColor.opacity(0.8))
                             .animation(.easeInOut(duration: 0.25), value: UUID())
                     )
                 }
@@ -1401,16 +1461,7 @@ private struct ItemPreviewCard: View {
                 .accessibilityLabel("Quantity \(quantity)")
             }
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.black.opacity(0.06))
-        )
-        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+        .padding(.vertical, 4)
         .highPriorityGesture(
             DragGesture(minimumDistance: 16).onEnded { _ in
                 if isBlank(title) { withAnimation(.easeInOut(duration: 0.2)) { isTitleOpen = false } }
@@ -1436,15 +1487,16 @@ private struct ItemPreviewCard: View {
 
 // Card-styled Add button for the Items section
 private struct AddItemCardButton: View {
+    @Environment(\.colorScheme) private var colorScheme
     var onTap: () -> Void
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
                 ZStack {
                     Circle().fill(LinearGradient(
-                        colors: [Color.blue.opacity(0.22), Color.indigo.opacity(0.18)],
+                        colors: [Color.green.opacity(0.70), Color.indigo.opacity(0.18)],
                         startPoint: .topLeading, endPoint: .bottomTrailing))
-                    Image(systemName: "plus").foregroundStyle(.blue)
+                    Image(systemName: "plus").foregroundStyle(.white)
                 }
                 .frame(width: 40, height: 40)
 
@@ -1459,7 +1511,7 @@ private struct AddItemCardButton: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.black.opacity(0.05))
+                    .strokeBorder(Color.black.opacity(colorScheme == .light ? 0.16 : 0.35))
             )
         }
         .buttonStyle(.plain)
@@ -1507,15 +1559,6 @@ private struct TopInvoiceCard: View {
             // Notes preview row (tapping opens details sheet to edit notes)
             NotesRow(noteText: noteText, onTap: onTapNotes)
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.systemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.black.opacity(0.06))
-        )
     }
 }
 
@@ -1899,30 +1942,16 @@ private struct ItemsGroupCard: View {
                     }
                 }
         )
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.systemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.black.opacity(0.06))
-        )
+        .padding(.vertical, 4)
 
         return content
             .contentShape(Rectangle())
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    // Only close inline editors; do not interfere with swipe-delete
-                    if actionItemID != nil {
-                        closeAction(commit: true)
-                    }
-                }
-            )
     }
 }
 
 private struct TotalsCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+    
     let subTotal: Double
     let taxAmount: Double
     let total: Double
@@ -1953,11 +1982,18 @@ private struct TotalsCard: View {
         .padding(.bottom, 10)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.systemBackground))
+                .fill(Color(.secondarySystemBackground))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.black.opacity(0.06))
+                .stroke(
+                    Color.black.opacity(colorScheme == .light ? 0.22 : 0.40)
+                )
+        )
+        .shadow(
+            color: Color.black.opacity(colorScheme == .light ? 0.10 : 0.32),
+            radius: colorScheme == .light ? 8 : 10,
+            y: colorScheme == .light ? 4 : 6
         )
     }
 
