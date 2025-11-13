@@ -349,7 +349,11 @@ struct AccountView: View {
         await MainActor.run { stripeLoading = true }
         let status = await IA_fetchStripeStatus()
         await MainActor.run {
-            self.stripeStatus = status
+            // Only update if we actually got a status.
+            // If `status` is nil (offline / error), keep the last known Stripe state.
+            if let status {
+                self.stripeStatus = status
+            }
             self.stripeLoading = false
         }
     }

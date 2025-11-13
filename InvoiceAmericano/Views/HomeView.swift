@@ -20,6 +20,7 @@ struct InvoicePreviewView: View {
 }
 
 struct HomeView: View {
+    @AppStorage("stripeLastStatusJSON") private var stripeLastStatusJSON: String = ""
     // Parent can switch tabs if needed (0=Home, 1=Invoices, 2=Clients, 3=Activity, 4=Account)
     var onSelectTab: ((Int) -> Void)? = nil
 
@@ -29,10 +30,28 @@ struct HomeView: View {
 
     @State private var isLoading = false
     @State private var errorText: String?
+    @State private var createdInvoiceIdFromHome: UUID? = nil
 
     // Stripe Connect state
     @State private var stripeStatus: StripeStatus?
     @State private var stripeLoading = false
+    // MARK: - Stripe status cache (offline-friendly)
+    private func loadCachedStripeStatus() -> StripeStatus? {
+        guard !stripeLastStatusJSON.isEmpty,
+              let data = stripeLastStatusJSON.data(using: .utf8) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(StripeStatus.self, from: data)
+    }
+
+    private func saveCachedStripeStatus(_ status: StripeStatus) {
+        guard let data = try? JSONEncoder().encode(status),
+              let json = String(data: data, encoding: .utf8) else {
+            return
+        }
+        stripeLastStatusJSON = json
+    }
+    
     // Stripe brand color (#635BFF) and "fully ready" state
     private let stripeBrand = Color(red: 0.388, green: 0.357, blue: 1.0) // #635BFF
     private var stripeFullyReady: Bool {
@@ -90,23 +109,32 @@ struct HomeView: View {
                 }
             }
         }
+        .navigationDestination(item: $createdInvoiceIdFromHome) { invoiceId in
+            InvoiceDetailView(invoiceId: invoiceId)
+        }
 
         // ====== Sheets ======
 
-        // New invoice sheet — match the NewInvoiceView glassy, centered title behavior
+        // New invoice sheet — after saving, jump straight to the new invoice detail
         .sheet(isPresented: $showNewInvoice) {
             NavigationStack {
                 NewInvoiceView(onSaved: { draft in
                     Task {
                         do {
-                            _ = try await InvoiceService.createInvoice(from: draft)
+                            let (newId, _) = try await InvoiceService.createInvoice(from: draft)
                             await refresh()
-                            await MainActor.run { showNewInvoice = false }
+                            await MainActor.run {
+                                createdInvoiceIdFromHome = newId   // navigate to detail after dismiss
+                                showNewInvoice = false
+                            }
                         } catch {
                             await MainActor.run { errorText = error.localizedDescription }
                         }
                     }
                 })
+                .navigationTitle("New Invoice")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             }
         }
         
@@ -377,10 +405,24 @@ struct HomeView: View {
     // MARK: - Stripe helpers
     private func refreshStripe() async {
         await MainActor.run { stripeLoading = true }
+
+        // Try to fetch live status from Stripe via Supabase
         let status = await IA_fetchStripeStatus()
+
         await MainActor.run {
-            self.stripeStatus = status
-            self.stripeLoading = false
+            stripeLoading = false
+
+            if let s = status {
+                // ✅ Online and got a real status: use it and cache it
+                stripeStatus = s
+                saveCachedStripeStatus(s)
+            } else {
+                // ❌ Could not fetch (e.g., offline). If we have nothing in memory yet,
+                // fall back to the last known good status from local storage.
+                if stripeStatus == nil, let cached = loadCachedStripeStatus() {
+                    stripeStatus = cached
+                }
+            }
         }
     }
 

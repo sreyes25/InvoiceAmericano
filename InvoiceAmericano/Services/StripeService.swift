@@ -10,7 +10,7 @@ import SwiftUI
 import Supabase
 import Auth
 
-struct StripeStatus: Decodable {
+struct StripeStatus: Codable {
     let connected: Bool
     let details_submitted: Bool?
     let charges_enabled: Bool?

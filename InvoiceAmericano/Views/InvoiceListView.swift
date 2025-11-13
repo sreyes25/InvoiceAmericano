@@ -159,10 +159,25 @@ struct InvoiceListView: View {
 
     private func createInvoice(from draft: InvoiceDraft) async {
         do {
-            _ = try await InvoiceService.createInvoice(from: draft)
+            // 1) Create the invoice and get the new row
+            let created = try await InvoiceService.createInvoice(from: draft)
+
+            // 2) Refresh the list so the new invoice shows up
             await load()
+
+            // 3) On the main thread, close the sheet + jump to detail
+            await MainActor.run {
+                // this controls the New Invoice sheet
+                self.showNew = false
+
+                // this triggers your existing navigationDestination:
+                // .navigationDestination(item: $pushInvoiceId) { InvoiceDetailView(invoiceId: $0) }
+                self.pushInvoiceId = created.id
+            }
         } catch {
-            await MainActor.run { self.error = error.localizedDescription }
+            await MainActor.run {
+                self.error = error.localizedDescription
+            }
         }
     }
 

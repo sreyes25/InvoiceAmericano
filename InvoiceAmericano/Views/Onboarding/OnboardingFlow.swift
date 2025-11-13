@@ -20,6 +20,7 @@ struct SafariView: UIViewControllerRepresentable {
 
 struct OnboardingFlow: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
 
     @State private var step: Step = .welcome
     @State private var isSaving = false
@@ -149,6 +150,8 @@ struct OnboardingFlow: View {
             NotificationCenter.default.post(name: .brandingDidChange, object: businessName)
 
             await MainActor.run {
+                // Mark onboarding as complete locally so we don't show it again offline
+                hasCompletedOnboarding = true
                 isSaving = false
                 NotificationCenter.default.post(name: .onboardingDidFinish, object: nil)
                 dismiss()  // close onboarding
