@@ -28,9 +28,11 @@ struct HomeView: View {
     @State private var recentInvoices: [InvoiceRow] = []
     @State private var recentActivity: [ActivityJoined] = []
 
+    /// Single source of truth for “which invoice detail should we show?”
+    @State private var activeInvoiceId: UUID? = nil
+
     @State private var isLoading = false
     @State private var errorText: String?
-    @State private var createdInvoiceIdFromHome: UUID? = nil
 
     // Stripe Connect state
     @State private var stripeStatus: StripeStatus?
@@ -109,7 +111,7 @@ struct HomeView: View {
                 }
             }
         }
-        .navigationDestination(item: $createdInvoiceIdFromHome) { invoiceId in
+        .navigationDestination(item: $activeInvoiceId) { invoiceId in
             InvoiceDetailView(invoiceId: invoiceId)
         }
 
@@ -124,7 +126,7 @@ struct HomeView: View {
                             let (newId, _) = try await InvoiceService.createInvoice(from: draft)
                             await refresh()
                             await MainActor.run {
-                                createdInvoiceIdFromHome = newId   // navigate to detail after dismiss
+                                activeInvoiceId = newId            // navigate to detail after dismiss
                                 showNewInvoice = false
                             }
                         } catch {
@@ -143,25 +145,25 @@ struct HomeView: View {
             NavigationStack {
                 RecentInvoicesSheet(
                     recentInvoices: recentInvoices,
-                    onClose: { showInvoicesSheet = false },
                     onOpenFullInvoices: {
-                        // dismiss then jump to the Invoices tab
                         showInvoicesSheet = false
                         onSelectTab?(1)
+                    },
+                    onOpenInvoice: { invoiceId in
+                        showInvoicesSheet = false
+                        activeInvoiceId = invoiceId
                     }
                 )
-                // keep this so tapping rows in the sheet can still go to details
-                .navigationDestination(for: UUID.self) { invoiceId in
-                    InvoiceDetailView(invoiceId: invoiceId)
-                }
-                // Stable backdrop inside the sheet’s content
                 .background(Color(.systemBackground).ignoresSafeArea())
-                // Glassy, centered title like other sheets
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
                 .navigationTitle("Recent Invoices")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { showInvoicesSheet = false }
+                    }
+                }
             }
-            // Match the New Invoice sheet chrome
             .presentationDetents([.fraction(0.92), .large])
             .presentationCornerRadius(28)
             .presentationDragIndicator(.visible)
@@ -176,19 +178,23 @@ struct HomeView: View {
                     recentActivity: recentActivity,
                     onClose: { showActivitySheet = false },
                     onOpenFullActivity: {
-                        // dismiss then jump to the Activity tab
                         showActivitySheet = false
                         onSelectTab?(3)
+                    },
+                    onOpenInvoice: { invoiceId in
+                        showActivitySheet = false
+                        activeInvoiceId = invoiceId
                     }
                 )
-                .navigationDestination(for: UUID.self) { invoiceId in
-                    InvoiceDetailView(invoiceId: invoiceId)
-                }
-                // Stable backdrop + glassy bar to match other sheets
                 .background(Color(.systemBackground).ignoresSafeArea())
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
                 .navigationTitle("Recent Activity")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { showActivitySheet = false }
+                    }
+                }
             }
             .presentationDetents([.fraction(0.92), .large])
             .presentationCornerRadius(28)
@@ -911,8 +917,8 @@ private struct RecentInvoicesSheet: View {
     enum Filter: String, CaseIterable { case all, open, sent, paid, overdue }
 
     let recentInvoices: [InvoiceRow]
-    var onClose: (() -> Void)? = nil
     var onOpenFullInvoices: (() -> Void)? = nil
+    var onOpenInvoice: ((UUID) -> Void)? = nil
 
     @State private var filter: Filter = .all
     @State private var search = ""
@@ -937,97 +943,90 @@ private struct RecentInvoicesSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
+        ScrollView {
+            VStack(spacing: 16) {
 
-                    // ===== Header controls (filters + search) =====
-                    VStack(alignment: .leading, spacing: 8) {
-                        // Quick filter chips
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(Filter.allCases, id: \.self) { (f: Filter) in
-                                    Button {
-                                        filter = f
-                                    } label: {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: icon(for: f))
-                                            Text(title(for: f))
-                                        }
-                                        .font(.footnote.weight(.semibold))
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(
-                                            Capsule().fill(
-                                                filter == f
-                                                ? Color.blue.opacity(0.18)
-                                                : Color(.secondarySystemBackground)
-                                            )
-                                        )
-                                        .overlay(
-                                            Capsule().strokeBorder(
-                                                filter == f ? Color.blue.opacity(0.35)
-                                                            : Color.black.opacity(0.06)
-                                            )
-                                        )
+                // ===== Header controls (filters + search) =====
+                VStack(alignment: .leading, spacing: 8) {
+                    // Quick filter chips
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(Filter.allCases, id: \.self) { (f: Filter) in
+                                Button {
+                                    filter = f
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: icon(for: f))
+                                        Text(title(for: f))
                                     }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
-
-                        // Search
-                        TextField("Search by number or client", text: $search)
-                            .textInputAutocapitalization(.never)
-                            .disableAutocorrection(true)
-                            .padding(10)
-                            .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
-                    }
-                    .padding(.horizontal)
-
-                    // ===== Invoices list (cards) =====
-                    if filtered.isEmpty {
-                        VStack(spacing: 8) {
-                            Image(systemName: "doc.text.magnifyingglass").font(.title2)
-                            Text(emptyCopy)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 28)
-                    } else {
-                        LazyVStack(spacing: 12) {
-                            ForEach(filtered) { (inv: InvoiceRow) in
-                                NavigationLink(value: inv.id) {
-                                    InvoiceCardRow(inv: inv)
+                                    .font(.footnote.weight(.semibold))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        Capsule().fill(
+                                            filter == f
+                                            ? Color.blue.opacity(0.18)
+                                            : Color(.secondarySystemBackground)
+                                        )
+                                    )
+                                    .overlay(
+                                        Capsule().strokeBorder(
+                                            filter == f ? Color.blue.opacity(0.35)
+                                                        : Color.black.opacity(0.06)
+                                        )
+                                    )
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
-                        .padding(.horizontal)
+                        .padding(.vertical, 2)
                     }
 
-                    // ===== Footer =====
-                    Button {
-                        onOpenFullInvoices?()
-                    } label: {
-                        Label("Open full invoices list", systemImage: "list.bullet.rectangle")
+                    // Search
+                    TextField("Search by number or client", text: $search)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                }
+                .padding(.horizontal)
+
+                // ===== Invoices list (cards) =====
+                if filtered.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "doc.text.magnifyingglass").font(.title2)
+                        Text(emptyCopy)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 28)
+                } else {
+                    LazyVStack(spacing: 12) {
+                        ForEach(filtered) { (inv: InvoiceRow) in
+                            Button {
+                                onOpenInvoice?(inv.id)
+                            } label: {
+                                InvoiceCardRow(inv: inv)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     .padding(.horizontal)
-                    .padding(.bottom, 12)
                 }
-                .padding(.top, 8)
-            }
-            .navigationTitle("Recent Invoices")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { onClose?() }
+
+                // ===== Footer =====
+                Button {
+                    onOpenFullInvoices?()
+                } label: {
+                    Label("Open full invoices list", systemImage: "list.bullet.rectangle")
                 }
+                .padding(.horizontal)
+                .padding(.bottom, 12)
             }
-            .navigationDestination(for: UUID.self) { invoiceId in
-                // Navigate to your invoice preview/detail screen
-                InvoicePreviewView(invoiceId: invoiceId)
-            }
+            .padding(.top, 8)
         }
     }
 
@@ -1176,6 +1175,7 @@ private struct RecentActivitySheet: View {
     let recentActivity: [ActivityJoined]
     var onClose: (() -> Void)? = nil
     var onOpenFullActivity: (() -> Void)? = nil
+    var onOpenInvoice: ((UUID) -> Void)? = nil
 
     @State private var filter: Filter = .all
     @State private var search = ""
@@ -1202,7 +1202,6 @@ private struct RecentActivitySheet: View {
     }
 
     var body: some View {
-        NavigationStack {
         ScrollView {
             VStack(spacing: 16) {
                 // ===== Header controls (filters + search) =====
@@ -1246,7 +1245,10 @@ private struct RecentActivitySheet: View {
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
                         .padding(10)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color(.secondarySystemBackground))
+                        )
                 }
                 .padding(.horizontal)
 
@@ -1257,7 +1259,8 @@ private struct RecentActivitySheet: View {
                 if filtered.isEmpty {
                     VStack(spacing: 8) {
                         Image(systemName: "bell.slash").font(.title2)
-                        Text(search.isEmpty ? "No activity for this filter yet" : "No results for “\(search)”")
+                        Text(search.isEmpty ? "No activity for this filter yet"
+                                            : "No results for “\(search)”")
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -1276,8 +1279,12 @@ private struct RecentActivitySheet: View {
                                     ForEach(rows) { (a: ActivityJoined) in
                                         Group {
                                             if let id = a.invoice_id {
-                                                NavigationLink(value: id) { ActivityCardRow(a: a) }
-                                                    .buttonStyle(.plain)
+                                                Button {
+                                                    onOpenInvoice?(id)
+                                                } label: {
+                                                    ActivityCardRow(a: a)
+                                                }
+                                                .buttonStyle(.plain)
                                             } else {
                                                 ActivityCardRow(a: a)
                                             }
@@ -1288,7 +1295,9 @@ private struct RecentActivitySheet: View {
                                                     try? await ActivityService.delete(id: a.id)
                                                     await recalcAndBroadcastUnread()
                                                 }
-                                            } label: { Label("Delete", systemImage: "trash") }
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
                                         }
                                     }
                                 }
@@ -1300,7 +1309,7 @@ private struct RecentActivitySheet: View {
 
                 // ===== Footer =====
                 Button {
-                    onOpenFullActivity?()   // dismiss sheet + switch tab
+                    onOpenFullActivity?()
                 } label: {
                     Label("Open full activity feed", systemImage: "list.bullet.rectangle")
                 }
@@ -1308,16 +1317,6 @@ private struct RecentActivitySheet: View {
                 .padding(.bottom, 12)
             }
             .padding(.top, 8)
-        }
-        .navigationTitle("Recent Activity")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Done") { onClose?() }
-            }
-        }
-        .navigationDestination(for: UUID.self) { invoiceId in
-            InvoicePreviewView(invoiceId: invoiceId)
-        }
         }
     }
 

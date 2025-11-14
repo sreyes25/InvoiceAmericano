@@ -236,11 +236,54 @@ enum PDFGenerator {
 
             // ===== Line items =====
             for item in detail.line_items {
-                draw("\(item.qty)",                      at: CGPoint(x: colQtyX,  y: y), font: .systemFont(ofSize: 12))
-                draw(item.description,                   at: CGPoint(x: colDescX, y: y), font: .systemFont(ofSize: 12), align: .left,  width: descW)
+                let startY = y
+
+                // Quantity and amount stay aligned to the first line (title or description)
+                draw("\(item.qty)",
+                     at: CGPoint(x: colQtyX,  y: startY),
+                     font: .systemFont(ofSize: 12))
+
                 draw(currency(item.amount, code: detail.currency),
-                                                      at: CGPoint(x: colAmtX,  y: y), font: .systemFont(ofSize: 12), align: .right, width: colAmtW)
-                y += 18
+                     at: CGPoint(x: colAmtX,  y: startY),
+                     font: .systemFont(ofSize: 12),
+                     align: .right,
+                     width: colAmtW)
+
+                // Title/description logic – mirrors the app UI behavior
+                let rawTitle = item.title?.trimmedNonEmpty
+                let rawDesc  = item.description.trimmedNonEmpty
+                let (title, body) = normalizeTitleAndBody(title: rawTitle, description: rawDesc)
+
+                var rowHeight: CGFloat = 18
+
+                if let title {
+                    // First line: bold title
+                    draw(title,
+                         at: CGPoint(x: colDescX, y: startY),
+                         font: .boldSystemFont(ofSize: 12),
+                         align: .left,
+                         width: descW)
+
+                    if let body {
+                        // Second line: regular description, directly under the title
+                        let bodyY = startY + 16
+                        draw(body,
+                             at: CGPoint(x: colDescX, y: bodyY),
+                             font: .systemFont(ofSize: 12),
+                             align: .left,
+                             width: descW)
+                        rowHeight = 32   // two lines (title + description)
+                    }
+                } else if let body {
+                    // Only description provided – single regular line
+                    draw(body,
+                         at: CGPoint(x: colDescX, y: startY),
+                         font: .systemFont(ofSize: 12),
+                         align: .left,
+                         width: descW)
+                }
+
+                y = startY + rowHeight
             }
 
             // Bottom divider under items
@@ -330,6 +373,38 @@ enum PDFGenerator {
         let hr = maxH / max(size.height, 1)
         let r  = min(wr, hr)
         return CGSize(width: size.width * r, height: size.height * r)
+    }
+
+    // MARK: - Item title/description normalization (shared logic with UI intent)
+    /// Returns a preferred title and body for a line item, following these rules:
+    /// - If a distinct `title` exists, it is used as the bold line. The description (if non‑empty
+    ///   and not identical) is shown as a second regular line.
+    /// - If no title but a short description exists (<= 32 chars), treat it as a title only.
+    /// - Otherwise, use the description as the body only.
+    private static func normalizeTitleAndBody(title: String?, description: String?) -> (String?, String?) {
+        let t = title?.trimmedNonEmpty
+        let d = description?.trimmedNonEmpty
+
+        // 1) Explicit title wins; description becomes body if distinct
+        if let t {
+            if let d, d.caseInsensitiveCompare(t) != .orderedSame {
+                return (t, d)
+            } else {
+                // Description is empty or same as title – show title only
+                return (t, nil)
+            }
+        }
+
+        // 2) No title – decide based on description length
+        guard let d else { return (nil, nil) }
+        let threshold = 32
+        if d.count <= threshold {
+            // Short description promoted to title
+            return (d, nil)
+        } else {
+            // Long description stays as body text
+            return (nil, d)
+        }
     }
 
     // MARK: - Format helpers

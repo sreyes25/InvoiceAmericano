@@ -116,10 +116,32 @@ struct InvoiceDetailView: View {
                                 .foregroundStyle(.secondary)
 
                                 ForEach(Array(d.line_items.enumerated()), id: \.element.id) { idx, it in
-                                    HStack {
-                                        Text("\(it.qty)").frame(width: 40, alignment: .leading)
-                                        Text(it.description).frame(maxWidth: .infinity, alignment: .leading)
-                                        Text(currency(it.amount, d.currency)).frame(width: 90, alignment: .trailing)
+                                    let parsed = splitTitleAndBody(title: it.title, description: it.description)
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Text("\(it.qty)")
+                                            .frame(width: 40, alignment: .leading)
+                                            .padding(.top, 2)
+
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            if let title = parsed.title, !title.isEmpty {
+                                                Text(title)
+                                                    .font(.subheadline.weight(.semibold))
+                                            }
+                                            if let body = parsed.body, !body.isEmpty {
+                                                Text(body)
+                                                    .font(.footnote)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            if it.qty > 1 {
+                                                Text("\(it.qty) × \(currency(it.unit_price, d.currency)) each")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                                        Text(currency(it.amount, d.currency))
+                                            .frame(width: 90, alignment: .trailing)
                                     }
                                     .padding(.vertical, 6)
                                     .background(idx.isMultiple(of: 2) ? Color.primary.opacity(0.03) : .clear)
@@ -336,6 +358,62 @@ struct InvoiceDetailView: View {
     }
 
     // MARK: - Helpers
+
+    private func splitTitleAndBody(title: String?, description: String) -> (title: String?, body: String?) {
+        let rawTitle = (title ?? "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        let rawDescription = description.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+
+        // New world: explicit title + description coming from the database
+        if !rawTitle.isEmpty {
+            // If description is empty or literally the same as the title,
+            // treat this as a "title-only" line item.
+            if rawDescription.isEmpty || rawDescription == rawTitle {
+                return (rawTitle, nil)
+            }
+
+            // Otherwise, show a real title + description pair.
+            return (rawTitle, rawDescription)
+        }
+
+        // Legacy invoices where we only stored a single description string.
+        // Fall back to the old parsing heuristics so existing data still renders nicely.
+        if !rawDescription.isEmpty {
+            return parseTitleAndBody(rawDescription)
+        }
+
+        return (nil, nil)
+    }
+
+    private func parseTitleAndBody(_ raw: String) -> (title: String?, body: String?) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return (nil, nil) }
+
+        // First, try to split on a clear title/body separator we use when saving
+        let separators = [" – ", " - "]
+        for sep in separators {
+            if let range = trimmed.range(of: sep) {
+                let left = String(trimmed[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let right = String(trimmed[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if !left.isEmpty && !right.isEmpty {
+                    return (left, right)
+                } else if !left.isEmpty {
+                    // Only a title was effectively provided
+                    return (left, nil)
+                } else if !right.isEmpty {
+                    // Only a body/description
+                    return (nil, right)
+                }
+            }
+        }
+
+        // No explicit separator. If it's reasonably short, treat it as a title; otherwise as description.
+        if trimmed.count <= 40 {
+            return (trimmed, nil)
+        } else {
+            return (nil, trimmed)
+        }
+    }
 
     private func currency(_ amount: Double, _ code: String?) -> String {
         let f = NumberFormatter()

@@ -59,6 +59,7 @@ private struct NewInvoicePayload: Encodable {
 
 private struct NewLineItemPayload: Encodable {
     let invoice_id: UUID
+    let title: String?
     let description: String
     let qty: Int
     let unit_price: Double
@@ -270,17 +271,50 @@ enum InvoiceService {
         let invoiceId = created.id
 
         // ---- 7) Insert line items ----
-        // IMPORTANT: `description` here comes from `draft.items[i].description`.
-        // The New Invoice UI (ItemPicker/quick-pick title field) must copy the
-        // visible item name into this `description` property BEFORE calling
-        // `createInvoice`, otherwise saved invoices/PDFs will show a blank line.
-        let itemsPayload = draft.items.map {
-            NewLineItemPayload(
+        let itemsPayload = draft.items.map { item in
+            let cleanedTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanedDesc  = item.description.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let isPlaceholderTitle = cleanedTitle.isEmpty || cleanedTitle == "Title"
+            let isPlaceholderDesc  = cleanedDesc.isEmpty || cleanedDesc == "Description"
+
+            // TITLE + DESCRIPTION rules:
+            // Case A: Title + Description → save both
+            // Case B: Description only → title = nil
+            // Case C: Title only → description = title
+            // Case D: Both empty → filler
+            let finalTitle: String?
+            let finalDescription: String
+
+            if !isPlaceholderTitle && !isPlaceholderDesc {
+                // both valid
+                finalTitle = cleanedTitle
+                finalDescription = cleanedDesc
+
+            } else if isPlaceholderTitle && !isPlaceholderDesc {
+                // only description provided
+                finalTitle = nil
+                finalDescription = cleanedDesc
+
+            } else if !isPlaceholderTitle && isPlaceholderDesc {
+      
+                // only title provided
+                finalTitle = cleanedTitle
+                finalDescription = cleanedTitle
+
+            } else {
+                // both empty
+                finalTitle = nil
+                finalDescription = "Item"
+            }
+
+            return NewLineItemPayload(
                 invoice_id: invoiceId,
-                description: $0.description,
-                qty: max(1, $0.quantity),
-                unit_price: $0.unitPrice,
-                amount: Double(max(1, $0.quantity)) * $0.unitPrice
+                title: finalTitle,
+                description: finalDescription,
+                qty: max(1, item.quantity),
+                unit_price: item.unitPrice,
+                amount: Double(max(1, item.quantity)) * item.unitPrice
             )
         }
         _ = try await client.from("line_items").insert(itemsPayload).execute()
@@ -352,7 +386,7 @@ enum InvoiceService {
             .select("""
                 id, number, status, subtotal, tax, total, currency, created_at, issued_at, due_date, checkout_url,
                 client:clients!invoices_client_id_fkey(name),
-                line_items(id, description, qty, unit_price, amount)
+                line_items(id, title, description, qty, unit_price, amount)
             """)
             .eq("id", value: id.uuidString)
             .limit(1)                  // <- extra safety with single()
@@ -362,4 +396,3 @@ enum InvoiceService {
         return detail
     }
 }
-
