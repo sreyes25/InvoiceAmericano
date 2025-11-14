@@ -270,6 +270,10 @@ enum InvoiceService {
         let invoiceId = created.id
 
         // ---- 7) Insert line items ----
+        // IMPORTANT: `description` here comes from `draft.items[i].description`.
+        // The New Invoice UI (ItemPicker/quick-pick title field) must copy the
+        // visible item name into this `description` property BEFORE calling
+        // `createInvoice`, otherwise saved invoices/PDFs will show a blank line.
         let itemsPayload = draft.items.map {
             NewLineItemPayload(
                 invoice_id: invoiceId,
@@ -358,5 +362,4 @@ enum InvoiceService {
         return detail
     }
 }
-
 

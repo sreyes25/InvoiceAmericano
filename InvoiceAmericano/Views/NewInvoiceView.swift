@@ -333,7 +333,16 @@ struct NewInvoiceView: View {
                     currentItemIndex: draft.items.count + 1,
                     presets: ["Service call", "Labor hour", "Materials", "Cleanup"],
                     onAdd: { newItem in
-                        draft.items.append(newItem)
+                        var item = newItem
+                        // If the user only filled the title (or used a quick pick), promote it
+                        // into the description so the saved invoice has visible line text.
+                        let trimmedTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let trimmedDesc  = item.description.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if trimmedDesc.isEmpty, !trimmedTitle.isEmpty {
+                            item.description = trimmedTitle
+                        }
+
+                        draft.items.append(item)
                         showItemPicker = false
                     },
                     onClose: { showItemPicker = false }
