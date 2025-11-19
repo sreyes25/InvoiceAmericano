@@ -215,75 +215,189 @@ enum PDFGenerator {
             draw(detail.client?.name ?? "—", at: CGPoint(x: leftX, y: y), font: UIFont.systemFont(ofSize: 13))
             y += 20
 
-            // ===== Table header =====
-            drawLine(y: y, inset: inset, pageWidth: pageW)
-            y += 10
+            // ===== Table header + line items (with pagination) =====
+            // Common column metrics
+            let colIndexW: CGFloat = 28
+            let colAmtW: CGFloat   = 90
 
-            let colQtyW: CGFloat  = 60
-            let colAmtW: CGFloat  = 100
-            let colQtyX           = leftX
-            let colAmtX           = rightX - colAmtW
-            let colDescX          = colQtyX + colQtyW + 10
-            let descW             = colAmtX - colDescX - 10
+            let colIndexX          = leftX
+            let colAmtX            = rightX - colAmtW
+            let colDescX           = colIndexX + colIndexW + 10
+            let descW              = colAmtX - colDescX - 10
 
-            draw("QUANTITY",    at: CGPoint(x: colQtyX,  y: y), font: .boldSystemFont(ofSize: 12))
-            draw("DESCRIPTION", at: CGPoint(x: colDescX, y: y), font: .boldSystemFont(ofSize: 12))
-            draw("AMOUNT",      at: CGPoint(x: colAmtX,  y: y), font: .boldSystemFont(ofSize: 12), align: .right, width: colAmtW)
+            let itemTitleFont = UIFont.boldSystemFont(ofSize: 12)
+            let itemBodyFont  = UIFont.systemFont(ofSize: 12)
+            let unitsFont     = UIFont.systemFont(ofSize: 10)
 
-            y += 18
-            drawLine(y: y, inset: inset, pageWidth: pageW)
-            y += 8
+            // Draw the table header and return the new y-position
+            func drawItemsHeader(at startY: CGFloat) -> CGFloat {
+                var yy = startY
+                drawLine(y: yy, inset: inset, pageWidth: pageW)
+                yy += 10
 
-            // ===== Line items =====
-            for item in detail.line_items {
-                let startY = y
-
-                // Quantity and amount stay aligned to the first line (title or description)
-                draw("\(item.qty)",
-                     at: CGPoint(x: colQtyX,  y: startY),
-                     font: .systemFont(ofSize: 12))
-
-                draw(currency(item.amount, code: detail.currency),
-                     at: CGPoint(x: colAmtX,  y: startY),
-                     font: .systemFont(ofSize: 12),
+                draw("ITEM",
+                     at: CGPoint(x: colIndexX,  y: yy),
+                     font: .boldSystemFont(ofSize: 12))
+                draw("DESCRIPTION",
+                     at: CGPoint(x: colDescX,   y: yy),
+                     font: .boldSystemFont(ofSize: 12))
+                draw("AMOUNT",
+                     at: CGPoint(x: colAmtX,    y: yy),
+                     font: .boldSystemFont(ofSize: 12),
                      align: .right,
                      width: colAmtW)
 
+                yy += 18
+                drawLine(y: yy, inset: inset, pageWidth: pageW)
+                yy += 8
+                return yy
+            }
+
+            // Reserve some space at the bottom of the page for totals + footer.
+            // Slightly tighter so long descriptions can use more of the page
+            // before we push the next item to a new page.
+            let bottomReserved: CGFloat = 10
+            let pageContentBottom = pageH - inset - bottomReserved
+
+
+            // Helper to start a continuation page for items
+            func startNewItemsPage() {
+                ctx.beginPage()
+                // Solid background
+                UIColor.white.setFill()
+                UIRectFill(CGRect(x: 0, y: 0, width: pageW, height: pageH))
+
+                var yy: CGFloat = inset
+                draw("Items (continued)", at: CGPoint(x: leftX, y: yy), font: UIFont.boldSystemFont(ofSize: 13))
+                yy += 22
+                y = drawItemsHeader(at: yy)
+            }
+
+            // Initial header on the first page
+            y = drawItemsHeader(at: y)
+
+            // ===== Line items with pagination (allow splitting across pages without wasting space) =====
+            for (index, item) in detail.line_items.enumerated() {
                 // Title/description logic – mirrors the app UI behavior
                 let rawTitle = item.title?.trimmedNonEmpty
                 let rawDesc  = item.description.trimmedNonEmpty
-                let (title, body) = normalizeTitleAndBody(title: rawTitle, description: rawDesc)
+                let (title, fullBody) = normalizeTitleAndBody(title: rawTitle, description: rawDesc)
 
-                var rowHeight: CGFloat = 18
+                var remainingBody = fullBody
+                var firstSegment = true
 
-                if let title {
-                    // First line: bold title
-                    draw(title,
-                         at: CGPoint(x: colDescX, y: startY),
-                         font: .boldSystemFont(ofSize: 12),
-                         align: .left,
-                         width: descW)
+                // We may need to draw a single item across multiple pages
+                while firstSegment || remainingBody != nil {
 
-                    if let body {
-                        // Second line: regular description, directly under the title
-                        let bodyY = startY + 16
-                        draw(body,
-                             at: CGPoint(x: colDescX, y: bodyY),
-                             font: .systemFont(ofSize: 12),
+                    // Ensure there is at least room for a line of text on this page;
+                    // if not, start a new continuation page.
+                    if y + itemBodyFont.lineHeight > pageContentBottom {
+                        startNewItemsPage()
+                    }
+
+                    let startY = y
+                    var rowHeight: CGFloat = 0
+
+                    // Item index (1-based) and amount appear on the first segment only.
+                    if firstSegment {
+                        let itemNumber = index + 1
+                        draw("\(itemNumber)",
+                             at: CGPoint(x: colIndexX, y: startY),
+                             font: itemBodyFont)
+
+                        draw(currency(item.amount, code: detail.currency),
+                             at: CGPoint(x: colAmtX, y: startY),
+                             font: itemBodyFont,
+                             align: .right,
+                             width: colAmtW)
+                    }
+
+                    // 1) Title (bold, may wrap to multiple lines) – only on the first segment
+                    if firstSegment, let title {
+                        let titleHeight = textHeight(title, font: itemTitleFont, width: descW)
+                        draw(title,
+                             at: CGPoint(x: colDescX, y: startY),
+                             font: itemTitleFont,
                              align: .left,
                              width: descW)
-                        rowHeight = 32   // two lines (title + description)
+                        rowHeight = max(rowHeight, titleHeight)
                     }
-                } else if let body {
-                    // Only description provided – single regular line
-                    draw(body,
-                         at: CGPoint(x: colDescX, y: startY),
-                         font: .systemFont(ofSize: 12),
-                         align: .left,
-                         width: descW)
-                }
 
-                y = startY + rowHeight
+                    // 2) Body/description (regular) – may span pages and be split across them
+                    if let bodySource = remainingBody ?? fullBody {
+                        let spacing: CGFloat = (firstSegment && title != nil ? 2 : 0)
+                        let bodyY = startY + rowHeight + spacing
+
+                        // How much vertical space is left for body text on this page?
+                        var availableBodyHeight = pageContentBottom - bodyY
+
+                        // If there is no room even for one line, push to a new page and try again.
+                        if availableBodyHeight <= itemBodyFont.lineHeight {
+                            startNewItemsPage()
+                            continue
+                        }
+
+                        // Split body text into a chunk that fits on this page and an optional remainder.
+                        let split = splitTextToFit(
+                            bodySource,
+                            font: itemBodyFont,
+                            width: descW,
+                            maxHeight: availableBodyHeight
+                        )
+
+                        if !split.fitting.isEmpty {
+                            let usedHeight = textHeight(split.fitting, font: itemBodyFont, width: descW)
+                            draw(split.fitting,
+                                 at: CGPoint(x: colDescX, y: bodyY),
+                                 font: itemBodyFont,
+                                 align: .left,
+                                 width: descW)
+
+                            rowHeight = max(rowHeight, (bodyY - startY) + usedHeight)
+                        }
+
+                        remainingBody = split.remainder
+                    }
+
+                    // 3) Units breakdown only on the final segment
+                    if remainingBody == nil, item.qty > 1, item.amount > 0 {
+                        let unit = item.amount / Double(item.qty)
+                        let unitsText = "\(item.qty) x \(currency(unit, code: detail.currency)) each"
+                        let spacingBelow: CGFloat = 2
+                        var unitsY = startY + rowHeight + spacingBelow
+                        let unitsHeight = textHeight(unitsText, font: unitsFont, width: descW)
+
+                        // If the units line doesn't fit on this page, start a new page and draw it there.
+                        if unitsY + unitsHeight > pageContentBottom {
+                            startNewItemsPage()
+                            unitsY = y
+                        }
+
+                        draw(unitsText,
+                             at: CGPoint(x: colDescX, y: unitsY),
+                             font: unitsFont,
+                             align: .left,
+                             width: descW,
+                             color: UIColor(white: 0.4, alpha: 1.0))
+
+                        rowHeight = max(rowHeight, (unitsY - startY) + unitsHeight)
+                    }
+
+                    if rowHeight == 0 {
+                        rowHeight = itemBodyFont.lineHeight
+                    }
+
+                    // padding between segments/rows
+                    y = startY + rowHeight + 6
+
+                    // After the first segment, we only draw continuations if there is still body text left.
+                    if firstSegment {
+                        firstSegment = false
+                        if remainingBody == nil { break }
+                    } else if remainingBody == nil {
+                        break
+                    }
+                }
             }
 
             // Bottom divider under items
@@ -355,6 +469,87 @@ enum PDFGenerator {
         let rect = CGRect(x: origin.x, y: origin.y, width: width, height: .greatestFiniteMagnitude)
         NSAttributedString(string: text, attributes: attrs)
             .draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
+    }
+
+    /// Measure the height needed to draw a block of text with a given font and width.
+    private static func textHeight(_ text: String, font: UIFont, width: CGFloat) -> CGFloat {
+        let para = NSMutableParagraphStyle()
+        para.alignment = .left
+        para.lineBreakMode = .byWordWrapping
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .paragraphStyle: para
+        ]
+        let rect = (text as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attrs,
+            context: nil
+        )
+        return ceil(rect.height)
+    }
+
+    /// Split `text` into a prefix that fits within `maxHeight` and an optional remainder.
+    /// Ensures that page breaks never occur inside a word by snapping the split point
+    /// back to the last whitespace or newline before the boundary, while always consuming
+    /// at least one character to make progress.
+    private static func splitTextToFit(
+        _ text: String,
+        font: UIFont,
+        width: CGFloat,
+        maxHeight: CGFloat
+    ) -> (fitting: String, remainder: String?) {
+        guard !text.isEmpty else { return ("", nil) }
+
+        // If the whole text fits, we are done.
+        if textHeight(text, font: font, width: width) <= maxHeight {
+            return (text, nil)
+        }
+
+        let ns = text as NSString
+        var low = 0
+        var high = ns.length
+        var best = 0
+
+        // Binary search for the longest prefix that fits vertically.
+        while low <= high {
+            let mid = (low + high) / 2
+            if mid == 0 { break }
+            let candidate = ns.substring(to: mid)
+            let h = textHeight(candidate, font: font, width: width)
+            if h <= maxHeight {
+                best = mid
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+
+        // Snap the break back to the last whitespace/newline so we don't
+        // cut a word in half across pages.
+        let whitespace = CharacterSet.whitespacesAndNewlines
+        var safeBest = best
+        if safeBest > 0 && safeBest < ns.length {
+            var i = safeBest
+            while i > 0 {
+                let ch = ns.character(at: i - 1)
+                if let scalar = UnicodeScalar(ch), whitespace.contains(scalar) {
+                    // Break *before* this whitespace.
+                    safeBest = i - 1
+                    break
+                }
+                i -= 1
+            }
+        }
+
+        // Ensure we always consume at least one character to make progress.
+        if safeBest == 0 {
+            safeBest = min(1, ns.length)
+        }
+
+        let fitting = ns.substring(to: safeBest)
+        let remainder: String? = (safeBest < ns.length) ? ns.substring(from: safeBest) : nil
+        return (fitting, remainder)
     }
 
     /// Light divider line that looks good in light/dark themes.

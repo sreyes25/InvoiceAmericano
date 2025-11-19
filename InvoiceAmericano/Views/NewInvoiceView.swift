@@ -460,15 +460,24 @@ private struct LineItemCard: View {
     @FocusState private var focusedField: Field?
     enum Field { case title, desc, price }
 
-    static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.currencyCode = "USD"
-        f.maximumFractionDigits = 2
-        return f
-    }()
+    @State private var unitPriceText: String = ""
 
     private var lineTotal: Double { Double(quantity) * unitPrice }
+
+    private func formattedString(from value: Double) -> String {
+        let v = max(0, value)
+        if v == 0 { return "" }
+        if v.rounded(.towardZero) == v {
+            return String(Int(v))
+        } else {
+            return String(format: "%.2f", v)
+        }
+    }
+
+    private func parsePrice(_ s: String) -> Double {
+        let cleaned = s.filter { ("0"..."9").contains($0) || $0 == "." }
+        return Double(cleaned) ?? 0
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -512,22 +521,28 @@ private struct LineItemCard: View {
                             Spacer(minLength: 8)
 
                             // Unit price editor (compact, trailing aligned)
-                            TextField("Unit price", value: $unitPrice, formatter: Self.currencyFormatter)
+                            TextField("Unit price", text: $unitPriceText)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 140)
                                 .focused($focusedField, equals: .price)
                                 .toolbar { keyboardToolbar }
+                                .onChange(of: unitPriceText) { _, newVal in
+                                    unitPrice = parsePrice(newVal)
+                                }
                         }
                     } else {
                         HStack {
                             Spacer()
-                            TextField("Price", value: $unitPrice, formatter: Self.currencyFormatter)
+                            TextField("Price", text: $unitPriceText)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 180, alignment: .trailing)
                                 .focused($focusedField, equals: .price)
                                 .toolbar { keyboardToolbar }
+                                .onChange(of: unitPriceText) { _, newVal in
+                                    unitPrice = parsePrice(newVal)
+                                }
                         }
                         Button("Add quantity") { quantity = 2 }
                             .font(.caption)
@@ -558,6 +573,11 @@ private struct LineItemCard: View {
                 )
         )
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onAppear {
+            if unitPriceText.isEmpty {
+                unitPriceText = formattedString(from: unitPrice)
+            }
+        }
     }
 
     // Small “calculator-ish” keyboard toolbar
@@ -1109,16 +1129,25 @@ private struct ItemPickerSheet: View {
     var onAdd: (LineItemDraft) -> Void
     var onClose: () -> Void
 
-    private static let currencyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
-        f.currencyCode = "USD"
-        f.maximumFractionDigits = 2
-        return f
-    }()
+    @State private var unitPriceText: String = ""
 
     private var lineTotal: Double {
         Double(max(1, viewModel.quantity)) * max(0, viewModel.unitPrice)
+    }
+
+    private func formattedString(from value: Double) -> String {
+        let v = max(0, value)
+        if v == 0 { return "" }
+        if v.rounded(.towardZero) == v {
+            return String(Int(v))
+        } else {
+            return String(format: "%.2f", v)
+        }
+    }
+
+    private func parsePrice(_ s: String) -> Double {
+        let cleaned = s.filter { ("0"..."9").contains($0) || $0 == "." }
+        return Double(cleaned) ?? 0
     }
 
     var body: some View {
@@ -1152,10 +1181,13 @@ private struct ItemPickerSheet: View {
 
                             HStack(spacing: 12) {
                                 Spacer()
-                                TextField("0.00", value: $viewModel.unitPrice, formatter: ItemPickerSheet.currencyFormatter)
+                                TextField("0.00", text: $unitPriceText)
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
                                     .frame(width: 180, alignment: .trailing)
+                                    .onChange(of: unitPriceText) { _, newVal in
+                                        viewModel.unitPrice = parsePrice(newVal)
+                                    }
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
@@ -1219,6 +1251,9 @@ private struct ItemPickerSheet: View {
                         || viewModel.unitPrice <= 0
                     )
                 }
+            }
+            .onAppear {
+                unitPriceText = formattedString(from: viewModel.unitPrice)
             }
         }
     }
@@ -1315,9 +1350,25 @@ private struct ItemPreviewCard: View {
 
     @State private var isTitleOpen = false
     @State private var isDescOpen  = false
+    @State private var unitPriceText: String = ""
 
     private func isBlank(_ s: String) -> Bool {
         s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func formattedString(from value: Double) -> String {
+        let v = max(0, value)
+        if v == 0 { return "" }
+        if v.rounded(.towardZero) == v {
+            return String(Int(v))
+        } else {
+            return String(format: "%.2f", v)
+        }
+    }
+
+    private func parsePrice(_ s: String) -> Double {
+        let cleaned = s.filter { ("0"..."9").contains($0) || $0 == "." }
+        return Double(cleaned) ?? 0
     }
 
     var body: some View {
@@ -1388,12 +1439,15 @@ private struct ItemPreviewCard: View {
                         .foregroundStyle(.secondary)
                     HStack(spacing: 12) {
                         Spacer()
-                        TextField("0.00", value: $unitPrice, formatter: LineItemCard.currencyFormatter)
+                        TextField("0.00", text: $unitPriceText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 180, alignment: .trailing)
                             .focused($focusedField, equals: .price)
                             .toolbar { keyboardToolbar }
+                            .onChange(of: unitPriceText) { _, newVal in
+                                unitPrice = parsePrice(newVal)
+                            }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 12)
@@ -1477,6 +1531,11 @@ private struct ItemPreviewCard: View {
                 if isBlank(description) { withAnimation(.easeInOut(duration: 0.2)) { isDescOpen  = false } }
             }
         )
+        .onAppear {
+            if unitPriceText.isEmpty {
+                unitPriceText = formattedString(from: unitPrice)
+            }
+        }
     }
 
     // Small “calculator-ish” keyboard toolbar
@@ -1574,6 +1633,7 @@ private struct TopInvoiceCard: View {
 // A reusable swipe-to-delete row that works inside VStacks (not only List rows).
 private struct SwipeableItemRow<Content: View>: View {
     @State private var offsetX: CGFloat = 0          // current drag offset of the row
+    @State private var isHorizontalDrag: Bool = false
     let revealWidth: CGFloat                         // how far the row moves to reveal the button
     let swipeToEndThreshold: CGFloat                 // threshold distance for full swipe-to-delete
 
@@ -1642,17 +1702,47 @@ private struct SwipeableItemRow<Content: View>: View {
                     DragGesture(minimumDistance: 10, coordinateSpace: .local)
                         .onChanged { value in
                             guard isEnabled else { return }
-                            let translation = value.translation.width
-                            if translation < 0 {
-                                // Allow the row to be dragged past the reveal width so the user can swipe it off-screen
-                                offsetX = translation
+
+                            let dx = value.translation.width
+                            let dy = value.translation.height
+
+                            // Decide if this drag should be treated as a horizontal swipe.
+                            if !isHorizontalDrag {
+                                if abs(dx) > abs(dy), abs(dx) > 6 {
+                                    // Lock into horizontal mode once we are clearly moving sideways.
+                                    isHorizontalDrag = true
+                                } else {
+                                    // Mostly vertical so far: let the parent scroll view handle it.
+                                    return
+                                }
+                            }
+
+                            // Only handle the drag if we locked into horizontal mode.
+                            guard isHorizontalDrag else { return }
+
+                            if dx < 0 {
+                                // Swiping left: allow dragging past the reveal width so the user can swipe it off-screen
+                                offsetX = dx
                             } else {
                                 // Swiping right: do not allow positive offset
                                 offsetX = 0
                             }
                         }
-                        .onEnded { _ in
+                        .onEnded { value in
                             guard isEnabled else { return }
+
+                            defer {
+                                // Always reset for the next gesture
+                                isHorizontalDrag = false
+                            }
+
+                            // If this drag never became a horizontal swipe, treat it as a scroll gesture.
+                            guard isHorizontalDrag else {
+                                withAnimation(.spring(response: 0.28, dampingFraction: 0.9)) {
+                                    offsetX = 0
+                                }
+                                return
+                            }
 
                             // First, if the row was dragged far enough, treat it as a full swipe-to-delete.
                             if let swipeToEnd = onSwipeToEnd, offsetX < -swipeToEndThreshold {

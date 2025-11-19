@@ -235,15 +235,12 @@ enum InvoiceService {
             return nil
         }()
 
-        // Tax/Total: if draft has 0 tax but defaults has a taxRate, recompute
+        // Tax/Total: trust what the user chose in the draft.
+        // The New Invoice screen already applies any default tax rate
+        // and also handles the "no tax" case when the toggle is off.
         let effectiveSubtotal = draft.subTotal
-        var effectiveTax = draft.taxAmount
-        var effectiveTotal = draft.total
-
-        if effectiveTax == 0, let rate = defaults?.taxRate, rate > 0 {
-            effectiveTax = (effectiveSubtotal * rate) / 100.0
-            effectiveTotal = effectiveSubtotal + effectiveTax
-        }
+        let effectiveTax = draft.taxAmount
+        let effectiveTotal = draft.total
 
         // ---- 5) Build invoice payload from draft + merged defaults ----
         let payload = NewInvoicePayload(

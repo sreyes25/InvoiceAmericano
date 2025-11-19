@@ -61,6 +61,9 @@ private func AmountPill(_ value: String) -> some View {
     Text(value)
         .font(.title3.weight(.bold))
         .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .fixedSize(horizontal: true, vertical: false)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .foregroundStyle(.white)
@@ -109,7 +112,7 @@ struct InvoiceDetailView: View {
                         SectionBox(title: "Items") {
                             VStack(spacing: 8) {
                                 HStack {
-                                    Text("Qty").font(.caption).frame(width: 40, alignment: .leading)
+                                    Text("Item").font(.caption).frame(width: 40, alignment: .leading)
                                     Text("Description").font(.caption).frame(maxWidth: .infinity, alignment: .leading)
                                     Text("Amount").font(.caption).frame(width: 90, alignment: .trailing)
                                 }
@@ -118,7 +121,7 @@ struct InvoiceDetailView: View {
                                 ForEach(Array(d.line_items.enumerated()), id: \.element.id) { idx, it in
                                     let parsed = splitTitleAndBody(title: it.title, description: it.description)
                                     HStack(alignment: .top, spacing: 8) {
-                                        Text("\(it.qty)")
+                                        Text("\(idx + 1)")
                                             .frame(width: 40, alignment: .leading)
                                             .padding(.top, 2)
 
@@ -231,8 +234,9 @@ struct InvoiceDetailView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(d.client?.name ?? "—")
-                        .font(.title3.weight(.semibold))
+                        .font(.headline.weight(.semibold)) // slightly smaller so long names fit better
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)           // allow the name to shrink instead of clipping
                     Text("Invoice \(d.number)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
