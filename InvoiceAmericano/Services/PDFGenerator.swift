@@ -60,18 +60,61 @@ enum PDFGenerator {
         // Optional logo
         let logo: UIImage? = await fetchLogoImage(from: branding)
 
-        // Optional default footer text
+        // Optional footer text: only from branding/defaults, not from invoice notes
         let defaults = try? await InvoiceDefaultsService.loadDefaults()
         let footerText = defaults?.footerNotes?.trimmedNonEmpty
 
+        let snapshot = InvoicePDFSnapshot(from: detail)
+
         return try render(
-            detail: detail,
+            snapshot: snapshot,
             businessName: businessName,
             tagline: tagline,
             accent: accent,
             logo: logo,
             footerText: footerText
         )
+    }
+
+    /// Convenience API for callers that want in-memory PDF data (e.g., previews)
+    static func makeInvoicePDFData(detail: InvoiceDetail, includeBranding: Bool = true) async throws -> Data {
+        let url = try await makeInvoicePDF(detail: detail, includeBranding: includeBranding)
+        return try Data(contentsOf: url)
+    }
+
+    // MARK: - Draft / Snapshot preview API
+
+    /// Build an in-memory PDF preview from an `InvoicePDFSnapshot` (used for drafts
+    /// and unsaved invoices in the UI).
+    static func makeInvoicePreview(
+        from snapshot: InvoicePDFSnapshot,
+        includeBranding: Bool = true
+    ) async throws -> Data {
+        // Reuse the same branding + business-name logic as invoices
+        let businessName: String = await fetchBusinessName()
+        var branding: Any? = nil
+        if includeBranding {
+            let loaded = try? await BrandingService.loadBranding()
+            branding = loaded
+        }
+
+        let tagline = readString(branding, keys: ["tagline","businessTagline","tag_line"])?.trimmedNonEmpty
+        let accentHexStr = readString(branding, keys: ["accentHex","accent_hex","accentColor","accent"])?.trimmedNonEmpty
+        let accent = accentHexStr.flatMap(hexToUIColor) ?? UIColor.systemBlue
+        let logo: UIImage? = await fetchLogoImage(from: branding)
+
+        let defaults = try? await InvoiceDefaultsService.loadDefaults()
+        let footerText = defaults?.footerNotes?.trimmedNonEmpty
+
+        let url = try render(
+            snapshot: snapshot,
+            businessName: businessName,
+            tagline: tagline,
+            accent: accent,
+            logo: logo,
+            footerText: footerText
+        )
+        return try Data(contentsOf: url)
     }
 
     /// Fetch the current user's business name from profiles.display_name (single source of truth)
@@ -97,8 +140,9 @@ enum PDFGenerator {
 
     // MARK: - Sync API w/ simple defaults (back-compat)
     static func makeInvoicePDF(detail: InvoiceDetail) throws -> URL {
-        try render(
-            detail: detail,
+        let snapshot = InvoicePDFSnapshot(from: detail)
+        return try render(
+            snapshot: snapshot,
             businessName: "Your Business",
             tagline: nil,
             accent: .systemBlue,
@@ -107,9 +151,15 @@ enum PDFGenerator {
         )
     }
 
+    /// Synchronous convenience for back-compat callers that want in-memory PDF data
+    static func makeInvoicePDFData(detail: InvoiceDetail) throws -> Data {
+        let url = try makeInvoicePDF(detail: detail)
+        return try Data(contentsOf: url)
+    }
+
     // MARK: - Core Render (single page)
     private static func render(
-        detail: InvoiceDetail,
+        snapshot: InvoicePDFSnapshot,
         businessName: String,
         tagline: String?,
         accent: UIColor,
@@ -125,7 +175,7 @@ enum PDFGenerator {
         // PDF metadata
         let format = UIGraphicsPDFRendererFormat()
         format.documentInfo = [
-            kCGPDFContextTitle: "Invoice \(detail.number)",
+            kCGPDFContextTitle: "Invoice \(snapshot.number)",
             kCGPDFContextCreator: "InvoiceAmericano"
         ] as [String : Any]
 
@@ -134,7 +184,7 @@ enum PDFGenerator {
             format: format
         )
 
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Invoice-\(detail.number).pdf")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Invoice-\(snapshot.number).pdf")
         try? FileManager.default.removeItem(at: url)
 
         try renderer.writePDF(to: url) { ctx in
@@ -157,7 +207,7 @@ enum PDFGenerator {
             let headerNameFont  = UIFont.boldSystemFont(ofSize: 20)
             let headerTagFont   = UIFont.systemFont(ofSize: 12)
             let metaFont        = UIFont.systemFont(ofSize: 12)
-            let metaWidth: CGFloat = 220
+            let metaWidth: CGFloat = 150
             let metaX = rightX - metaWidth
 
             // Left: Business name + tagline
@@ -167,11 +217,7 @@ enum PDFGenerator {
             }
 
             // Enlarged logo box for a bigger appearance
-            let logoBox = CGRect(x: rightX - 200, y: y - 10, width: 200, height: 100)
-
-            // Debug guide (disabled in production):
-            // UIColor.systemRed.withAlphaComponent(0.25).setStroke()
-            // UIBezierPath(rect: logoBox).stroke()
+            let logoBox = CGRect(x: rightX - 70, y: y - 10, width: 70, height: 70)
 
             var rightBlockTop = y
             if let logo {
@@ -191,14 +237,12 @@ enum PDFGenerator {
             }
 
             // Add more space below the taller logo
-            var metaY = rightBlockTop + 16
-            draw("Invoice # \(detail.number)", at: CGPoint(x: metaX, y: metaY), font: metaFont, align: .right, width: metaWidth)
-            metaY += 16
-            if let ds = detail.issued_at ?? detail.created_at {
-                draw("Date: \(prettyDate(ds))", at: CGPoint(x: metaX, y: metaY), font: metaFont, align: .right, width: metaWidth)
+            var metaY = rightBlockTop + 5
+            if let issued = snapshot.issuedAt {
+                draw("Date: \(prettyDate(issued))", at: CGPoint(x: metaX, y: metaY), font: metaFont, align: .right, width: metaWidth)
                 metaY += 16
             }
-            if let due = detail.dueDate {
+            if let due = snapshot.dueDate {
                 draw("Due: \(prettyDate(due))", at: CGPoint(x: metaX, y: metaY), font: metaFont, align: .right, width: metaWidth)
             }
 
@@ -212,11 +256,10 @@ enum PDFGenerator {
             // ===== Bill To block =====
             draw("Bill To:", at: CGPoint(x: leftX, y: y), font: UIFont.boldSystemFont(ofSize: 13))
             y += 16
-            draw(detail.client?.name ?? "—", at: CGPoint(x: leftX, y: y), font: UIFont.systemFont(ofSize: 13))
+            draw(snapshot.client?.name ?? "—", at: CGPoint(x: leftX, y: y), font: UIFont.systemFont(ofSize: 13))
             y += 20
 
             // ===== Table header + line items (with pagination) =====
-            // Common column metrics
             let colIndexW: CGFloat = 28
             let colAmtW: CGFloat   = 90
 
@@ -224,12 +267,12 @@ enum PDFGenerator {
             let colAmtX            = rightX - colAmtW
             let colDescX           = colIndexX + colIndexW + 10
             let descW              = colAmtX - colDescX - 10
+            let bodyIndent: CGFloat = 8
 
             let itemTitleFont = UIFont.boldSystemFont(ofSize: 12)
             let itemBodyFont  = UIFont.systemFont(ofSize: 12)
             let unitsFont     = UIFont.systemFont(ofSize: 10)
 
-            // Draw the table header and return the new y-position
             func drawItemsHeader(at startY: CGFloat) -> CGFloat {
                 var yy = startY
                 drawLine(y: yy, inset: inset, pageWidth: pageW)
@@ -253,17 +296,11 @@ enum PDFGenerator {
                 return yy
             }
 
-            // Reserve some space at the bottom of the page for totals + footer.
-            // Slightly tighter so long descriptions can use more of the page
-            // before we push the next item to a new page.
             let bottomReserved: CGFloat = 10
             let pageContentBottom = pageH - inset - bottomReserved
 
-
-            // Helper to start a continuation page for items
             func startNewItemsPage() {
                 ctx.beginPage()
-                // Solid background
                 UIColor.white.setFill()
                 UIRectFill(CGRect(x: 0, y: 0, width: pageW, height: pageH))
 
@@ -276,9 +313,8 @@ enum PDFGenerator {
             // Initial header on the first page
             y = drawItemsHeader(at: y)
 
-            // ===== Line items with pagination (allow splitting across pages without wasting space) =====
-            for (index, item) in detail.line_items.enumerated() {
-                // Title/description logic – mirrors the app UI behavior
+            // ===== Line items with pagination =====
+            for (index, item) in snapshot.items.enumerated() {
                 let rawTitle = item.title?.trimmedNonEmpty
                 let rawDesc  = item.description.trimmedNonEmpty
                 let (title, fullBody) = normalizeTitleAndBody(title: rawTitle, description: rawDesc)
@@ -286,11 +322,8 @@ enum PDFGenerator {
                 var remainingBody = fullBody
                 var firstSegment = true
 
-                // We may need to draw a single item across multiple pages
                 while firstSegment || remainingBody != nil {
 
-                    // Ensure there is at least room for a line of text on this page;
-                    // if not, start a new continuation page.
                     if y + itemBodyFont.lineHeight > pageContentBottom {
                         startNewItemsPage()
                     }
@@ -298,21 +331,19 @@ enum PDFGenerator {
                     let startY = y
                     var rowHeight: CGFloat = 0
 
-                    // Item index (1-based) and amount appear on the first segment only.
                     if firstSegment {
                         let itemNumber = index + 1
                         draw("\(itemNumber)",
                              at: CGPoint(x: colIndexX, y: startY),
                              font: itemBodyFont)
 
-                        draw(currency(item.amount, code: detail.currency),
+                        draw(currency(item.amount, code: snapshot.currency),
                              at: CGPoint(x: colAmtX, y: startY),
                              font: itemBodyFont,
                              align: .right,
                              width: colAmtW)
                     }
 
-                    // 1) Title (bold, may wrap to multiple lines) – only on the first segment
                     if firstSegment, let title {
                         let titleHeight = textHeight(title, font: itemTitleFont, width: descW)
                         draw(title,
@@ -323,35 +354,33 @@ enum PDFGenerator {
                         rowHeight = max(rowHeight, titleHeight)
                     }
 
-                    // 2) Body/description (regular) – may span pages and be split across them
                     if let bodySource = remainingBody ?? fullBody {
                         let spacing: CGFloat = (firstSegment && title != nil ? 2 : 0)
                         let bodyY = startY + rowHeight + spacing
 
-                        // How much vertical space is left for body text on this page?
-                        var availableBodyHeight = pageContentBottom - bodyY
-
-                        // If there is no room even for one line, push to a new page and try again.
+                        let availableBodyHeight = pageContentBottom - bodyY
                         if availableBodyHeight <= itemBodyFont.lineHeight {
                             startNewItemsPage()
                             continue
                         }
 
-                        // Split body text into a chunk that fits on this page and an optional remainder.
+                        let bodyX = colDescX + bodyIndent
+                        let bodyWidth = descW - bodyIndent
+
                         let split = splitTextToFit(
                             bodySource,
                             font: itemBodyFont,
-                            width: descW,
+                            width: bodyWidth,
                             maxHeight: availableBodyHeight
                         )
 
                         if !split.fitting.isEmpty {
-                            let usedHeight = textHeight(split.fitting, font: itemBodyFont, width: descW)
+                            let usedHeight = textHeight(split.fitting, font: itemBodyFont, width: bodyWidth)
                             draw(split.fitting,
-                                 at: CGPoint(x: colDescX, y: bodyY),
+                                 at: CGPoint(x: bodyX, y: bodyY),
                                  font: itemBodyFont,
                                  align: .left,
-                                 width: descW)
+                                 width: bodyWidth)
 
                             rowHeight = max(rowHeight, (bodyY - startY) + usedHeight)
                         }
@@ -359,25 +388,26 @@ enum PDFGenerator {
                         remainingBody = split.remainder
                     }
 
-                    // 3) Units breakdown only on the final segment
-                    if remainingBody == nil, item.qty > 1, item.amount > 0 {
-                        let unit = item.amount / Double(item.qty)
-                        let unitsText = "\(item.qty) x \(currency(unit, code: detail.currency)) each"
+                    if remainingBody == nil, item.quantity > 1, item.amount > 0 {
+                        let unit = item.amount / Double(item.quantity)
+                        let unitsText = "\(item.quantity) x \(currency(unit, code: snapshot.currency)) each"
                         let spacingBelow: CGFloat = 2
                         var unitsY = startY + rowHeight + spacingBelow
-                        let unitsHeight = textHeight(unitsText, font: unitsFont, width: descW)
 
-                        // If the units line doesn't fit on this page, start a new page and draw it there.
+                        let unitsX = colDescX + bodyIndent
+                        let unitsWidth = descW - bodyIndent
+                        let unitsHeight = textHeight(unitsText, font: unitsFont, width: unitsWidth)
+
                         if unitsY + unitsHeight > pageContentBottom {
                             startNewItemsPage()
                             unitsY = y
                         }
 
                         draw(unitsText,
-                             at: CGPoint(x: colDescX, y: unitsY),
+                             at: CGPoint(x: unitsX, y: unitsY),
                              font: unitsFont,
                              align: .left,
-                             width: descW,
+                             width: unitsWidth,
                              color: UIColor(white: 0.4, alpha: 1.0))
 
                         rowHeight = max(rowHeight, (unitsY - startY) + unitsHeight)
@@ -387,10 +417,8 @@ enum PDFGenerator {
                         rowHeight = itemBodyFont.lineHeight
                     }
 
-                    // padding between segments/rows
                     y = startY + rowHeight + 6
 
-                    // After the first segment, we only draw continuations if there is still body text left.
                     if firstSegment {
                         firstSegment = false
                         if remainingBody == nil { break }
@@ -412,37 +440,108 @@ enum PDFGenerator {
             let totalsLabelX          = totalsValueX - totalsValueW - 12 - totalsLabelW
 
             draw("SUBTOTAL", at: CGPoint(x: totalsLabelX, y: y), font: .systemFont(ofSize: 12), align: .right, width: totalsLabelW)
-            draw(currency(detail.subtotal ?? 0, code: detail.currency),
-                             at: CGPoint(x: totalsValueX - totalsValueW, y: y),
-                             font: .systemFont(ofSize: 12), align: .right, width: totalsValueW)
+            draw(currency(snapshot.subtotal, code: snapshot.currency),
+                 at: CGPoint(x: totalsValueX - totalsValueW, y: y),
+                 font: .systemFont(ofSize: 12), align: .right, width: totalsValueW)
             y += 16
 
-            if let t = detail.tax, t != 0 {
+            if snapshot.tax != 0 {
                 draw("TAX", at: CGPoint(x: totalsLabelX, y: y), font: .systemFont(ofSize: 12), align: .right, width: totalsLabelW)
-                draw(currency(t, code: detail.currency),
-                                 at: CGPoint(x: totalsValueX - totalsValueW, y: y),
-                                 font: .systemFont(ofSize: 12), align: .right, width: totalsValueW)
+                draw(currency(snapshot.tax, code: snapshot.currency),
+                     at: CGPoint(x: totalsValueX - totalsValueW, y: y),
+                     font: .systemFont(ofSize: 12), align: .right, width: totalsValueW)
                 y += 12
             }
 
-            // Accent stripe above TOTAL (thin, matches the sample)
             let stripeY = y + 6
             accent.setFill()
             UIRectFill(CGRect(x: totalsLabelX, y: stripeY, width: totalsLabelW + 12 + totalsValueW, height: 2))
             y += 12
 
             draw("TOTAL", at: CGPoint(x: totalsLabelX, y: y), font: .boldSystemFont(ofSize: 13), align: .right, width: totalsLabelW)
-            draw(currency(detail.total ?? 0, code: detail.currency),
-                             at: CGPoint(x: totalsValueX - totalsValueW, y: y),
-                             font: .boldSystemFont(ofSize: 13), align: .right, width: totalsValueW)
+            draw(currency(snapshot.total, code: snapshot.currency),
+                 at: CGPoint(x: totalsValueX - totalsValueW, y: y),
+                 font: .boldSystemFont(ofSize: 13), align: .right, width: totalsValueW)
             y += 24
 
-            // ===== Footer =====
-            drawLine(y: y, inset: inset, pageWidth: pageW)
-            y += 10
-            draw("Thank you for your business!", at: CGPoint(x: leftX, y: y), font: .systemFont(ofSize: 11))
+            // ===== Temporary payment details (local, for now) =====
+            let paymentLabelFont = UIFont.boldSystemFont(ofSize: 12)
+            let paymentBodyFont  = UIFont.systemFont(ofSize: 11)
+
+            draw(
+                "Payment Details:",
+                at: CGPoint(x: leftX, y: y),
+                font: paymentLabelFont
+            )
             y += 14
-            draw((footerText ?? "-"), at: CGPoint(x: leftX, y: y), font: .systemFont(ofSize: 10))
+
+            draw(
+                "Zelle: sergreyes25@gmail.com",
+                at: CGPoint(x: leftX, y: y),
+                font: paymentBodyFont
+            )
+            y += 20
+
+            // ===== Important invoice note (from invoice `notes`) =====
+            if let note = snapshot.notes?.trimmedNonEmpty {
+                let boxLeft = leftX
+                let boxWidth = pageW - inset * 2
+                let labelFont = UIFont.boldSystemFont(ofSize: 12)
+                let bodyFont  = UIFont.systemFont(ofSize: 11)
+
+                let labelHeight = labelFont.lineHeight
+                let innerPadding: CGFloat = 8
+                let bodyWidth = boxWidth - innerPadding * 2
+                let bodyHeight = textHeight(note, font: bodyFont, width: bodyWidth)
+
+                let boxHeight = innerPadding + labelHeight + 4 + bodyHeight + innerPadding
+                let boxRect = CGRect(x: boxLeft, y: y, width: boxWidth, height: boxHeight)
+
+                let path = UIBezierPath(roundedRect: boxRect, cornerRadius: 8)
+                UIColor(white: 0.96, alpha: 1.0).setFill()
+                path.fill()
+                UIColor(white: 0.85, alpha: 1.0).setStroke()
+                path.lineWidth = 0.75
+                path.stroke()
+
+                let labelOrigin = CGPoint(x: boxLeft + innerPadding, y: y + innerPadding)
+                draw("Note", at: labelOrigin, font: labelFont)
+
+                let bodyOrigin = CGPoint(x: boxLeft + innerPadding, y: labelOrigin.y + labelHeight + 4)
+                draw(note,
+                     at: bodyOrigin,
+                     font: bodyFont,
+                     align: .left,
+                     width: bodyWidth)
+
+                y = boxRect.maxY + 16
+            }
+
+            // ===== Footer (bottom‑centered) =====
+            let footerTop = max(y + 20, pageH - inset - 60)
+            drawLine(y: footerTop, inset: inset, pageWidth: pageW)
+
+            let footerWidth = pageW - inset * 2
+            let thankFont = UIFont.boldSystemFont(ofSize: 13)
+            let noteFont   = UIFont.systemFont(ofSize: 10)
+
+            draw(
+                "Thank you for your business!",
+                at: CGPoint(x: inset, y: footerTop + 10),
+                font: thankFont,
+                align: .center,
+                width: footerWidth
+            )
+
+            if let footer = footerText?.trimmedNonEmpty {
+                draw(
+                    footer,
+                    at: CGPoint(x: inset, y: footerTop + 10 + 14),
+                    font: noteFont,
+                    align: .center,
+                    width: footerWidth
+                )
+            }
         }
 
         return url
@@ -632,6 +731,14 @@ enum PDFGenerator {
 
         let d = iso.date(from: s) ?? isoFS.date(from: s) ?? ymd.date(from: s)
         return d.map { out.string(from: $0) } ?? s
+    }
+
+    private static func prettyDate(_ date: Date) -> String {
+        let out = DateFormatter()
+        out.dateFormat = "MM/dd/yy"
+        out.timeZone = .current
+        out.locale = Locale(identifier: "en_US_POSIX")
+        return out.string(from: date)
     }
 
     private static func hexToUIColor(_ hex: String) -> UIColor? {

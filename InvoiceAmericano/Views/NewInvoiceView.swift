@@ -12,11 +12,30 @@ import SwiftUI
 import Foundation
 import UIKit
 import Combine
+import PDFKit
 
 // Global UI spacers for consistent structure
 private enum UI {
     static let rowH: CGFloat = 14      // horizontal insets for card rows
     static let rowV: CGFloat = 8       // vertical insets for card rows
+}
+
+// Simple PDFKit wrapper for in-memory draft preview
+private struct DraftPDFKitView: UIViewRepresentable {
+    let data: Data
+
+    func makeUIView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        view.displayMode = .singlePageContinuous
+        view.displayDirection = .vertical
+        view.document = PDFDocument(data: data)
+        return view
+    }
+
+    func updateUIView(_ uiView: PDFView, context: Context) {
+        // Nothing to update for now
+    }
 }
 
 // PreferenceKey to report Y position of a view (for sticky footer logic)
@@ -98,6 +117,9 @@ struct NewInvoiceView: View {
     var onSaved: (InvoiceDraft) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var isShowingPreview = false
+    @State private var pdfData: Data? = nil
+    @State private var isGeneratingPDF = false
     @State private var draft: InvoiceDraft
     @State private var clients: [ClientRow] = []
     @State private var isLoadingClients = true
@@ -225,9 +247,10 @@ struct NewInvoiceView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        onSaved(draft)
-                        dismiss()
+                    Button("Preview") {
+                        Task {
+                            await generatePreviewPDF()
+                        }
                     }
                     .disabled(!canSave)
                 }
@@ -386,6 +409,108 @@ struct NewInvoiceView: View {
                     didUserChangeDueDate = true
                 }
             }
+            .sheet(isPresented: $isShowingPreview) {
+                NavigationStack {
+                    VStack(spacing: 0) {
+                        if let data = pdfData {
+                            // Real PDF preview
+                            DraftPDFKitView(data: data)
+                                .ignoresSafeArea()
+                        } else {
+                            // Fallback while PDF is being generated or not available
+                            VStack(spacing: 20) {
+                                Text("Invoice Preview")
+                                    .font(.title2.bold())
+                                    .padding(.top)
+
+                                if isGeneratingPDF {
+                                    ProgressView("Generating PDF…")
+                                        .padding()
+                                }
+
+                                // Textual fallback preview
+                                List {
+                                    Section("Client") {
+                                        if let client = draft.client {
+                                            Text(client.name)
+                                            if let email = client.email, !email.isEmpty {
+                                                Text(email).foregroundStyle(.secondary)
+                                            }
+                                        } else {
+                                            Text("No client selected").foregroundStyle(.secondary)
+                                        }
+                                    }
+
+                                    Section("Details") {
+                                        Text("Invoice #: \(draft.number.isEmpty ? "—" : draft.number)")
+                                        Text("Due: \(draft.dueDate.formatted(date: .abbreviated, time: .omitted))")
+                                        Text("Tax: \(draft.taxPercent, format: .number)\u{202F}%")
+                                    }
+
+                                    Section("Items") {
+                                        if draft.items.isEmpty {
+                                            Text("No items").foregroundStyle(.secondary)
+                                        } else {
+                                            ForEach(Array(draft.items.enumerated()), id: \.element.id) { index, item in
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    Text(item.title.isEmpty ? "Item \(index + 1)" : item.title)
+                                                        .font(.headline)
+                                                    if !item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                                        Text(item.description)
+                                                            .font(.subheadline)
+                                                            .foregroundStyle(.secondary)
+                                                    }
+                                                    HStack {
+                                                        Text("Qty: \(item.quantity)")
+                                                        Spacer()
+                                                        Text(item.unitPrice, format: .currency(code: draft.currency))
+                                                    }
+                                                    .font(.footnote)
+                                                }
+                                                .padding(.vertical, 4)
+                                            }
+                                        }
+                                    }
+
+                                    Section("Totals") {
+                                        HStack {
+                                            Text("Subtotal")
+                                            Spacer()
+                                            Text(draft.subTotal, format: .currency(code: draft.currency))
+                                        }
+                                        HStack {
+                                            Text("Tax")
+                                            Spacer()
+                                            Text(draft.taxAmount, format: .currency(code: draft.currency))
+                                        }
+                                        HStack {
+                                            Text("Total")
+                                                .font(.headline)
+                                            Spacer()
+                                            Text(draft.total, format: .currency(code: draft.currency))
+                                                .font(.headline)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Edit") {
+                                isShowingPreview = false
+                            }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Save") {
+                                onSaved(draft)
+                                isShowingPreview = false
+                                dismiss()
+                            }
+                        }
+                    }
+                }
+            }
             .task { await loadClients() }
             .onAppear {
                 if draft.client == nil { showClientPicker = true }
@@ -396,10 +521,6 @@ struct NewInvoiceView: View {
                     await MainActor.run {
                         // Only apply if user hasn’t already changed them
                         if draft.taxPercent == 0 { draft.taxPercent = d.taxRate }
-                        if draft.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                           let footer = d.footerNotes, !footer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            draft.notes = footer
-                        }
                         if !didUserChangeDueDate {
                             if let newDue = Calendar.current.date(byAdding: .day, value: d.dueDays, to: Date()) {
                                 draft.dueDate = newDue
@@ -415,6 +536,33 @@ struct NewInvoiceView: View {
                         await MainActor.run { draft.number = next }
                     }
                 }
+            }
+        }
+    }
+    // --- Inserted generatePreviewPDF below ---
+    private func generatePreviewPDF() async {
+        await MainActor.run {
+            isGeneratingPDF = true
+            pdfData = nil
+            isShowingPreview = true
+            error = nil
+        }
+
+        do {
+            // Build a neutral snapshot from the in-progress draft
+            let snapshot = InvoicePDFSnapshot(from: draft)
+
+            // Ask the PDF generator for in-memory preview data
+            let data = try await PDFGenerator.makeInvoicePreview(from: snapshot)
+
+            await MainActor.run {
+                self.pdfData = data
+                self.isGeneratingPDF = false
+            }
+        } catch {
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.isGeneratingPDF = false
             }
         }
     }
@@ -2105,5 +2253,23 @@ private struct TotalsCard: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+}
+
+
+struct PDFKitView: UIViewRepresentable {
+    let data: Data
+
+    func makeUIView(context: Context) -> PDFView {
+        let pdfView = PDFView()
+        pdfView.autoScales = true
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.displayDirection = .vertical
+        pdfView.document = PDFDocument(data: data)
+        return pdfView
+    }
+
+    func updateUIView(_ uiView: PDFView, context: Context) {
+        uiView.document = PDFDocument(data: data)
     }
 }

@@ -503,24 +503,22 @@ private struct PDFPreviewSheet: View {
     @State private var payload: SharePayload? = nil
 
     var body: some View {
-        ZStack {
-            PDFKitView(url: url)
+        ZStack(alignment: .bottomTrailing) {
+            DetailPDFKitView(url: url)
                 .ignoresSafeArea()
-        }
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 12) {
-                Button {
-                    Task { await presentDownload() }
-                } label: {
-                    Label("Download", systemImage: "square.and.arrow.down")
-                        .frame(maxWidth: .infinity)
-                        .multilineTextAlignment(.center)
-                }
-                .buttonStyle(.borderedProminent)
+
+            Button {
+                Task { await presentDownload() }
+            } label: {
+                Image(systemName: "square.and.arrow.down")
+                    .font(.title2)
+                    .padding(12)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Circle())
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 16)
-            .background(.ultraThinMaterial)
+            .padding(.trailing, 20)
+            .padding(.bottom, 24)
         }
         // present AFTER payload is ready (prevents blank sheet on first try)
         .sheet(item: $payload) { p in
@@ -550,7 +548,7 @@ private struct PDFPreviewSheet: View {
     }
 }
 
-private struct PDFKitView: UIViewRepresentable {
+private struct DetailPDFKitView: UIViewRepresentable {
     let url: URL
     func makeUIView(context: Context) -> PDFView {
         let v = PDFView()

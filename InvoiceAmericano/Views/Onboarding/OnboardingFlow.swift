@@ -89,6 +89,13 @@ struct OnboardingFlow: View {
                 // Then advance if we are on the Stripe step
                 if step == .stripeConnect { step = .done }
             }
+//            .toolbar {
+//                ToolbarItem(placement: .topBarTrailing) {
+//                    Button("Log out") {
+//                        Task { await handleLogout() }
+//                    }
+//                }
+//            }
         }
         .overlay(alignment: .bottom) {
             if let err = errorText {
@@ -161,6 +168,24 @@ struct OnboardingFlow: View {
                 isSaving = false
                 errorText = error.localizedDescription
             }
+        }
+    }
+
+    // MARK: - Logout from onboarding
+    private func handleLogout() async {
+        let client = SupabaseManager.shared.client
+        do {
+            try await client.auth.signOut()
+        } catch {
+            await MainActor.run {
+                errorText = error.localizedDescription
+            }
+        }
+
+        await MainActor.run {
+            // Make sure onboarding is shown again next time after login
+            hasCompletedOnboarding = false
+            dismiss()
         }
     }
 }

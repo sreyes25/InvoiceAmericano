@@ -29,6 +29,7 @@ struct InvoiceDetail: Decodable {
     let issued_at: String?        // <-- we use this in the PDF
     let dueDate: String?          // maps from due_date
     let checkout_url: String?
+    let notes: String?
     let client: ClientRef?
     let line_items: [LineItemRow]
 
@@ -36,6 +37,7 @@ struct InvoiceDetail: Decodable {
         case id, number, status, subtotal, tax, total, currency, created_at
         case issued_at                 // <-- include this
         case dueDate = "due_date"      // snake_case -> camelCase
+        case notes
         case checkout_url, client, line_items
     }
 }

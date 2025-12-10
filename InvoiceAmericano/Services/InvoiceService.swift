@@ -200,7 +200,7 @@ enum InvoiceService {
         }
 
         // ---- 1) Load user defaults once (terms/taxRate/dueDays/footerNotes) ----
-        let defaults = try? await InvoiceDefaultsService.loadDefaults()
+        _ = try? await InvoiceDefaultsService.loadDefaults()
 
         // ---- 2) Ensure invoice number exists; auto-generate if user left it blank ----
         let trimmedNumber = draft.number.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -224,35 +224,29 @@ enum InvoiceService {
         // you can fallback to defaults?.dueDays here.
         let dueDateStr = ymd.string(from: draft.dueDate)
 
-        // ---- 4) Merge defaults for notes and tax if missing/zero ----
-        // Notes: if draft.notes is blank, use default footer notes (if present)
+        // ---- 4) Notes: only what the user typed on the invoice ----
         let trimmedNotes = draft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-        let effectiveNotes: String? = {
-            if !trimmedNotes.isEmpty { return trimmedNotes }
-            if let def = defaults?.footerNotes, !def.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                return def
-            }
-            return nil
-        }()
+        let effectiveNotes: String? = trimmedNotes.isEmpty ? nil : trimmedNotes
 
-        // Tax/Total: trust what the user chose in the draft.
-        // The New Invoice screen already applies any default tax rate
-        // and also handles the "no tax" case when the toggle is off.
+        // Tax / Total logic...
         let effectiveSubtotal = draft.subTotal
-        let effectiveTax = draft.taxAmount
-        let effectiveTotal = draft.total
+        let taxPercent = max(0, draft.taxPercent)
+        let effectiveTax: Double = taxPercent > 0
+            ? (effectiveSubtotal * taxPercent) / 100.0
+            : 0
+        let effectiveTotal = effectiveSubtotal + effectiveTax
 
         // ---- 5) Build invoice payload from draft + merged defaults ----
         let payload = NewInvoicePayload(
             number: finalNumber,
             client_id: clientId,
-            status: "open",                                  // stays open until it's sent
+            status: "open",
             subtotal: effectiveSubtotal,
             tax: effectiveTax,
             total: effectiveTotal,
             currency: draft.currency.lowercased(),
             due_date: dueDateStr,
-            notes: effectiveNotes,
+            notes: effectiveNotes,              // 👈 use only the invoice note
             user_id: AuthService.currentUserIDFast(),
             issued_at: issuedAtStr
         )
@@ -381,7 +375,7 @@ enum InvoiceService {
         let detail: InvoiceDetail = try await client
             .from("invoices")
             .select("""
-                id, number, status, subtotal, tax, total, currency, created_at, issued_at, due_date, checkout_url,
+                id, number, status, subtotal, tax, total, notes, currency, created_at, issued_at, due_date, checkout_url,
                 client:clients!invoices_client_id_fkey(name),
                 line_items(id, title, description, qty, unit_price, amount)
             """)
