@@ -188,10 +188,28 @@ struct InvoiceDetailView: View {
                     }
                 }
             } else {
-                EmptyView()
+                VStack(spacing: 12) {
+                    Text("No invoice loaded")
+                        .font(.headline)
+                    Text("ID: \(invoiceId.uuidString)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Button("Retry") {
+                        Task { await load() }
+                    }
+                }
+                .padding()
             }
         }
-        .task { await load() }
+        .task(id: invoiceId) {
+            await load()
+        }
+        .onAppear {
+            if detail == nil && !isLoading {
+                Task { await load() }
+            }
+        }
 
         // Present after payload is ready; this avoids the first-time blank sheet.
         .sheet(item: $sharePayload) { payload in

@@ -63,7 +63,9 @@ struct ClientDetailView: View {
                     } else {
                         VStack(spacing: 10) {
                             ForEach(invoices) { inv in
-                                NavigationLink(value: inv.id) {
+                                NavigationLink {
+                                    InvoiceDetailView(invoiceId: inv.id)
+                                } label: {
                                     InvoiceRowCard(inv: inv)
                                 }
                                 .buttonStyle(.plain)
@@ -95,9 +97,6 @@ struct ClientDetailView: View {
             }
         }
         .task { await loadInvoices() }
-        .navigationDestination(for: UUID.self) { invoiceId in
-            InvoiceDetailView(invoiceId: invoiceId)
-        }
     }
 
     // MARK: - Data
