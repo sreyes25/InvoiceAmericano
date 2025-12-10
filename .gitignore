@@ -1,6 +1,28 @@
+# ============================
+# Secrets / Config
+# ============================
+*.xcconfig
+*.entitlements
+
+# Ignore per-target config files
 InvoiceAmericano/Config.xcconfig
 
-# Secrets
-InvoiceAmericano/Config.xcconfig
-Config.xcconfig
-*.xcconfig
+# ============================
+# Ignore Info.plist
+# (covers Info.plist in any folder)
+# ============================
+Info.plist
+**/Info.plist
+
+# ============================
+# Xcode User Data (never commit)
+# ============================
+xcuserdata/
+*.xcuserstate
+
+# ============================
+# Build artifacts
+# ============================
+DerivedData/
+build/
+
