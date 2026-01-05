@@ -174,6 +174,15 @@ struct InvoiceListView: View {
                 // .navigationDestination(item: $pushInvoiceId) { InvoiceDetailView(invoiceId: $0) }
                 self.pushInvoiceId = created.id
             }
+
+            // 4) If we already have a pay link, surface it immediately for sharing
+            if let payURL = created.checkoutURL {
+                await MainActor.run { self.sharePayload = nil }
+                try? await Task.sleep(nanoseconds: 250_000_000) // brief pause for sheet dismissal animation
+                await MainActor.run {
+                    self.sharePayload = SharePayload(items: ["Pay this invoice", payURL])
+                }
+            }
         } catch {
             await MainActor.run {
                 self.error = error.localizedDescription
