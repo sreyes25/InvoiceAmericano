@@ -15,7 +15,7 @@ enum BrandNameProvider {
     static func currentBrandName() async -> String {
         let client = SupabaseManager.shared.client
         // Get current user id
-        guard let uid = SupabaseManager.shared.currentUserID() else {
+        guard let uid = SupabaseManager.shared.currentUserID else {
             return "Your Business"
         }
 
@@ -269,7 +269,6 @@ enum InvoiceService {
             .from("invoices")
             .insert(payload)
             .select("id")
-            .eq("user_id", value: uid)
             .single()
             .execute()
             .value

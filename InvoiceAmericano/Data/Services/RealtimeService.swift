@@ -25,10 +25,8 @@ enum RealtimeService {
         }
 
         // Create v2 Realtime channel
-        let ch = SupabaseManager.shared.client.realtimeV2.channel(
-            "activity-feed",
-            config: RealtimeChannelConfig(parameters: ["user_id": uid])
-        )
+        // Note: channel config types are internal in current supabase-swift; rely on RLS to scope events per user.
+        let ch = SupabaseManager.shared.client.realtimeV2.channel("activity-feed")
 
         // Listen for INSERTs on public.invoice_activity (Supabase Realtime v2 Swift API)
         _ = ch.onPostgresChange(

@@ -90,7 +90,7 @@ enum ActivityService {
 
     /// Returns the unread count for the current user by joining invoices (filters by invoices.user_id).
     static func unreadCountForCurrentUser() async -> Int {
-        guard let uid = SupabaseManager.shared.currentUserID() else { return 0 }
+        guard let uid = SupabaseManager.shared.currentUserID else { return 0 }
         do {
             let response = try await SupabaseManager.shared.client
                 .from("invoice_activity")
@@ -267,7 +267,7 @@ enum ActivityService {
 
     static func countUnread() async throws -> Int {
         let client = SupabaseManager.shared.client
-        guard let uid = SupabaseManager.shared.currentUserID() else { return 0 }
+        guard let uid = SupabaseManager.shared.currentUserID else { return 0 }
         let resp = try await client
             .from("invoice_activity")
             .select("id, invoices!inner(user_id)", head: true, count: .exact)
