@@ -25,11 +25,13 @@ private let IA_REQUEST_TIMEOUT: TimeInterval = 15
 private func iaAuthorizedRequest(url: URL, method: String = "GET") async throws -> URLRequest {
     let client = SupabaseManager.shared.client
     let session = try await client.auth.session
+    let uid = try SupabaseManager.shared.requireCurrentUserIDString()
     var req = URLRequest(url: url, timeoutInterval: IA_REQUEST_TIMEOUT)
     req.httpMethod = method
     // Ensures all Edge Function calls include Supabase JWT for auth verification (required when JWT is ON)
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+    req.setValue(uid, forHTTPHeaderField: "x-user-id")
     return req
 }
 

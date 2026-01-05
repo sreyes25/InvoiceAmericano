@@ -19,8 +19,16 @@ enum RealtimeService {
         // Avoid duplicates
         if channel != nil { return }
 
+        guard let uid = SupabaseManager.shared.currentUserIDString() else {
+            print("⚠️ Realtime start skipped: missing user id")
+            return
+        }
+
         // Create v2 Realtime channel
-        let ch = SupabaseManager.shared.client.realtimeV2.channel("activity-feed")
+        let ch = SupabaseManager.shared.client.realtimeV2.channel(
+            "activity-feed",
+            config: RealtimeChannelConfig(parameters: ["user_id": uid])
+        )
 
         // Listen for INSERTs on public.invoice_activity (Supabase Realtime v2 Swift API)
         _ = ch.onPostgresChange(

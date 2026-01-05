@@ -172,15 +172,14 @@ struct AccountView: View {
     private func loadBusinessName() async {
         let client = SupabaseManager.shared.client
         do {
-            let session = try await client.auth.session
-            let uid = session.user.id
+            let uid = try SupabaseManager.shared.requireCurrentUserIDString()
 
             struct ProfileRow: Decodable { let display_name: String? }
 
             let row: ProfileRow = try await client
                 .from("profiles")
                 .select("display_name")
-                .eq("id", value: uid.uuidString)
+                .eq("id", value: uid)
                 .single()
                 .execute()
                 .value

@@ -15,7 +15,7 @@ enum BrandNameProvider {
     static func currentBrandName() async -> String {
         let client = SupabaseManager.shared.client
         // Get current user id
-        guard let uid = client.auth.currentSession?.user.id else {
+        guard let uid = SupabaseManager.shared.currentUserID() else {
             return "Your Business"
         }
 
@@ -68,6 +68,7 @@ private struct NewLineItemPayload: Encodable {
 
 private struct CreateCheckoutRequest: Encodable {
     let invoice_id: String
+    let user_id: String
 }
 
 private struct _CheckoutURLRow: Decodable { let checkout_url: String? }
@@ -76,7 +77,10 @@ private struct _SentUpdate: Encodable { let status: String; let sent_at: String 
 // MARK: - Service
 
 enum InvoiceService {
-    
+    private static func requireUID() throws -> String {
+        try SupabaseManager.shared.requireCurrentUserIDString()
+    }
+
     // Lightweight stats for the Account tab
     struct AccountStats {
         let totalCount: Int
@@ -87,12 +91,14 @@ enum InvoiceService {
     // Recent invoices, newest first (used by Home dashboard)
     static func fetchRecentInvoices(limit: Int = 5) async throws -> [InvoiceRow] {
         let client = SupabaseManager.shared.client
+        let uid = try requireUID()
         let rows: [InvoiceRow] = try await client
             .from("invoices")
             .select("""
                 id, number, status, total, currency, created_at, due_date, client_id,
                 client:clients!invoices_client_id_fkey(name)
             """)
+            .eq("user_id", value: uid)
             .order("created_at", ascending: false)
             .limit(limit)
             .execute()
@@ -102,6 +108,7 @@ enum InvoiceService {
 
     static func fetchAccountStats() async throws -> AccountStats {
         let client = SupabaseManager.shared.client
+        let uid = try requireUID()
 
         // Keep it simple and reliable: fetch status + total and compute in-app.
         // (We can replace with SQL aggregates later if needed.)
@@ -110,6 +117,7 @@ enum InvoiceService {
         let rows: [Row] = try await client
             .from("invoices")
             .select("status,total")
+            .eq("user_id", value: uid)
             .execute()
             .value
 
@@ -129,11 +137,13 @@ enum InvoiceService {
     // Generate next invoice number like A1, A2, ... by scanning recent invoices
     static func nextInvoiceNumber() async throws -> String {
         let client = SupabaseManager.shared.client
+        let uid = try requireUID()
 
         // Pull recent numbers and find the max numeric suffix
         let resp = try await client
             .from("invoices")
             .select("number, created_at")
+            .eq("user_id", value: uid)
             .order("created_at", ascending: false)
             .limit(50)
             .execute()
@@ -156,10 +166,12 @@ enum InvoiceService {
     // List screen data
     static func fetchInvoices(status: InvoiceStatus) async throws -> [InvoiceRow] {
         let client = SupabaseManager.shared.client
+        let uid = try requireUID()
 
         let query = client
             .from("invoices")
             .select("id, number, status, total, created_at, due_date, client_id, client:clients!invoices_client_id_fkey(name)")
+            .eq("user_id", value: uid)
             .order("created_at", ascending: false)
 
         let rows: [InvoiceRow] = try await query.execute().value
@@ -194,6 +206,7 @@ enum InvoiceService {
     // Create an invoice + items, optionally trigger checkout
     static func createInvoice(from draft: InvoiceDraft) async throws -> (id: UUID, checkoutURL: URL?) {
         let client = SupabaseManager.shared.client
+        let uid = try requireUID()
 
         guard let clientId = draft.client?.id else {
             throw NSError(domain: "InvoiceService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing client on draft"])
@@ -247,7 +260,7 @@ enum InvoiceService {
             currency: draft.currency.lowercased(),
             due_date: dueDateStr,
             notes: effectiveNotes,              // 👈 use only the invoice note
-            user_id: AuthService.currentUserIDFast(),
+            user_id: uid,
             issued_at: issuedAtStr
         )
 
@@ -256,6 +269,7 @@ enum InvoiceService {
             .from("invoices")
             .insert(payload)
             .select("id")
+            .eq("user_id", value: uid)
             .single()
             .execute()
             .value
@@ -317,7 +331,7 @@ enum InvoiceService {
                 "create_checkout",
                 options: FunctionInvokeOptions(
                     headers: ["Content-Type": "application/json"],
-                    body: CreateCheckoutRequest(invoice_id: invoiceId.uuidString)
+                    body: CreateCheckoutRequest(invoice_id: invoiceId.uuidString, user_id: uid)
                 )
             )
         } catch {
@@ -330,13 +344,14 @@ enum InvoiceService {
     /// Creates/refreshes checkout session, stamps sent_at, and tries to fetch checkout_url.
     static func sendInvoice(id: UUID) async throws -> URL? {
         let client = SupabaseManager.shared.client
+        let uid = try requireUID()
 
         // 1) Trigger checkout session (ignore response body)
         _ = try? await client.functions.invoke(
             "create_checkout",
             options: FunctionInvokeOptions(
                 headers: ["Content-Type": "application/json"],
-                body: CreateCheckoutRequest(invoice_id: id.uuidString)
+                body: CreateCheckoutRequest(invoice_id: id.uuidString, user_id: uid)
             )
         )
 
@@ -347,6 +362,7 @@ enum InvoiceService {
                 .from("invoices")
                 .select("checkout_url")
                 .match(["id": id.uuidString])
+                .eq("user_id", value: uid)
                 .single()
                 .execute()
                 .value
@@ -361,17 +377,20 @@ enum InvoiceService {
     // Explicitly mark an invoice as sent after a successful user share action.
     static func markSent(id: UUID) async throws {
         let client = SupabaseManager.shared.client
+        let uid = try requireUID()
         let iso = ISO8601DateFormatter()
         _ = try await client
             .from("invoices")
             .update(_SentUpdate(status: "sent", sent_at: iso.string(from: Date())))
             .match(["id": id.uuidString])
+            .eq("user_id", value: uid)
             .execute()
     }
 
     // Detail screen data (includes items & issued_at)
     static func fetchInvoiceDetail(id: UUID) async throws -> InvoiceDetail {
         let client = SupabaseManager.shared.client
+        let uid = try requireUID()
         let detail: InvoiceDetail = try await client
             .from("invoices")
             .select("""
@@ -380,6 +399,7 @@ enum InvoiceService {
                 line_items(id, title, description, qty, unit_price, amount)
             """)
             .eq("id", value: id.uuidString)
+            .eq("user_id", value: uid)
             .limit(1)                  // <- extra safety with single()
             .single()
             .execute()

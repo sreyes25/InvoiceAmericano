@@ -71,12 +71,12 @@ enum AuthService {
     // MARK: - Session helpers
     /// Preferred: UUID typed user id if you need it.
     static func currentUserID() -> UUID? {
-        SupabaseManager.shared.client.auth.currentSession?.user.id
+        SupabaseManager.shared.currentUserID
     }
 
     /// Legacy helper kept for compatibility with any existing call sites.
     static func currentUserIDFast() -> String? {
-        SupabaseManager.shared.client.auth.currentSession?.user.id.uuidString
+        SupabaseManager.shared.currentUserIDString()
     }
 
     /// Optional: Good to call on app launch to validate/refresh local session.
