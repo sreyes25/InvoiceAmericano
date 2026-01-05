@@ -71,6 +71,10 @@ private struct CreateCheckoutRequest: Encodable {
     let user_id: String
 }
 
+private struct CreateCheckoutResponse: Decodable {
+    let checkout_url: String?
+}
+
 private struct _CheckoutURLRow: Decodable { let checkout_url: String? }
 private struct _SentUpdate: Encodable { let status: String; let sent_at: String }
 
@@ -323,16 +327,19 @@ enum InvoiceService {
         }
         _ = try await client.from("line_items").insert(itemsPayload).execute()
 
-        // ---- 8) Optionally create checkout (ignore response body if function not deployed) ----
-        let checkoutURL: URL? = nil
+        // ---- 8) Optionally create checkout and capture returned URL ----
+        var checkoutURL: URL? = nil
         do {
-            _ = try await client.functions.invoke(
+            let response: CreateCheckoutResponse = try await client.functions.invoke(
                 "create_checkout",
                 options: FunctionInvokeOptions(
                     headers: ["Content-Type": "application/json"],
                     body: CreateCheckoutRequest(invoice_id: invoiceId.uuidString, user_id: uid)
                 )
             )
+            if let s = response.checkout_url, let u = URL(string: s) {
+                checkoutURL = u
+            }
         } catch {
             // ignore if function not deployed yet
         }
