@@ -244,8 +244,7 @@ enum InvoiceDefaultsService {
 
     static func loadDefaults() async throws -> InvoiceDefaults? {
         let client = SupabaseManager.shared.client
-        let session = try? await client.auth.session
-        guard let uid = session?.user.id.uuidString else { return nil }
+        guard let uid = SupabaseManager.shared.currentUserIDString() else { return nil }
 
         struct Row: Decodable {
             let default_tax_rate: Double?
@@ -278,8 +277,7 @@ enum InvoiceDefaultsService {
         footerNotes: String?
     ) async throws {
         let client = SupabaseManager.shared.client
-        let session = try? await client.auth.session
-        guard let uid = session?.user.id.uuidString else { throw NSError(domain: "auth", code: 401) }
+        let uid = try SupabaseManager.shared.requireCurrentUserIDString()
 
         struct UpsertRow: Encodable {
             let user_id: String

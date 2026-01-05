@@ -59,9 +59,11 @@ private struct UpdateClientPayload: Encodable {
 enum ClientService {
     static func fetchClients() async throws -> [ClientRow] {
         let client = SupabaseManager.shared.client
+        let uid = try SupabaseManager.shared.requireCurrentUserIDString()
         let rows: [ClientRow] = try await client
             .from("clients")
             .select("id, name, email, phone, address, city, state, zip, created_at")
+            .eq("user_id", value: uid)
             .order("created_at", ascending: false)
             .execute()
             .value
@@ -78,7 +80,7 @@ enum ClientService {
         zip: String?
     ) async throws {
         let client = SupabaseManager.shared.client
-        let userId = AuthService.currentUserIDFast()
+        let userId = try SupabaseManager.shared.requireCurrentUserIDString()
 
         let payload = NewClientPayload(
             name: name,
@@ -94,16 +96,19 @@ enum ClientService {
         _ = try await client
             .from("clients")
             .insert(payload)
+            .eq("user_id", value: userId)
             .execute()
     }
 
     // Fetch a single client by id
     static func fetchClient(id: UUID) async throws -> ClientRow {
         let client = SupabaseManager.shared.client
+        let uid = try SupabaseManager.shared.requireCurrentUserIDString()
         let row: ClientRow = try await client
             .from("clients")
             .select("id, name, email, phone, address, city, state, zip, created_at")
             .eq("id", value: id.uuidString)
+            .eq("user_id", value: uid)
             .single()
             .execute()
             .value
@@ -122,6 +127,7 @@ enum ClientService {
         zip: String? = nil
     ) async throws {
         let client = SupabaseManager.shared.client
+        let uid = try SupabaseManager.shared.requireCurrentUserIDString()
         let patch = UpdateClientPayload(
             name: name,
             email: email,
@@ -137,6 +143,7 @@ enum ClientService {
             .from("clients")
             .update(patch)
             .match(["id": id.uuidString])
+            .eq("user_id", value: uid)
             .execute()
     }
 
@@ -144,12 +151,14 @@ enum ClientService {
     // MARK: Invoices for a client (list)
     static func fetchInvoicesForClient(clientId: UUID) async throws -> [InvoiceRow] {
         let client = SupabaseManager.shared.client
+        let uid = try SupabaseManager.shared.requireCurrentUserIDString()
 
         // NOTE: no .single() here — this returns an array
         let rows: [InvoiceRow] = try await client
             .from("invoices")
             .select("id, number, status, total, created_at, sent_at, due_date")
             .eq("client_id", value: clientId.uuidString)
+            .eq("user_id", value: uid)
             .order("created_at", ascending: false)
             .execute()
             .value

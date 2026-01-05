@@ -122,8 +122,7 @@ struct OnboardingFlow: View {
         let client = SupabaseManager.shared.client
 
         do {
-            let session = try await client.auth.session
-            let uid = session.user.id.uuidString
+            let uid = try SupabaseManager.shared.requireCurrentUserIDString()
 
             // 1) Update profiles.display_name
             struct ProfileUpdate: Encodable { let display_name: String }

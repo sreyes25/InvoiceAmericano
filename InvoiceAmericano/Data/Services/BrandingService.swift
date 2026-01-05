@@ -40,8 +40,7 @@ enum BrandingService {
         if let c = cached { return c }
 
         let client = SupabaseManager.shared.client
-        let session = try await client.auth.session
-        let uid = session.user.id.uuidString
+        let uid = try SupabaseManager.shared.requireCurrentUserIDString()
 
         // 1) profiles.display_name
         struct ProfileRow: Decodable { let display_name: String? }

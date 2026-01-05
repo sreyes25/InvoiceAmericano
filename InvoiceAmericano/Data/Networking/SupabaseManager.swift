@@ -33,6 +33,25 @@ enum Env {
 final class SupabaseManager {
     static let shared = SupabaseManager()
     let client: SupabaseClient
+    /// Centralized helper to read the currently authenticated user id (tenant key).
+    ///
+    /// Use this accessor everywhere instead of reaching into `auth` directly so we
+    /// have a single place to adjust behavior (lowercasing, fallbacks, etc.).
+    var currentUserID: UUID? { client.auth.currentSession?.user.id }
+
+    /// String helper for convenience (optionally lowercased for storage paths).
+    func currentUserIDString(lowercased: Bool = false) -> String? {
+        let raw = currentUserID?.uuidString
+        return lowercased ? raw?.lowercased() : raw
+    }
+
+    /// Throws a 401-style error when no user is present. Useful for guards.
+    func requireCurrentUserIDString(lowercased: Bool = false) throws -> String {
+        if let id = currentUserIDString(lowercased: lowercased) {
+            return id
+        }
+        throw NSError(domain: "auth", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
+    }
 
     private init() {
         // Read from Info.plist (populated by your .xcconfig)

@@ -152,8 +152,7 @@ struct BrandingView: View {
     private func load() async {
         do {
             let client = SupabaseManager.shared.client
-            let session = try await client.auth.session
-            let uid = session.user.id
+            let uid = try SupabaseManager.shared.requireCurrentUserIDString()
 
             // 1) Try branding_settings (may not exist yet)
             struct BrandingRow: Decodable {
@@ -168,7 +167,7 @@ struct BrandingView: View {
                 branding = try await client
                     .from("branding_settings")
                     .select("business_name,tagline,accent_hex,logo_public_url")
-                    .eq("user_id", value: uid.uuidString)
+                    .eq("user_id", value: uid)
                     .limit(1)
                     .single()
                     .execute()
@@ -183,7 +182,7 @@ struct BrandingView: View {
             let profile: ProfileRow = try await client
                 .from("profiles")
                 .select("display_name")
-                .eq("id", value: uid.uuidString)
+                .eq("id", value: uid)
                 .single()
                 .execute()
                 .value
@@ -213,8 +212,7 @@ struct BrandingView: View {
 
         do {
             let client = SupabaseManager.shared.client
-            let session = try await client.auth.session
-            let uid = session.user.id.uuidString
+            let uid = try SupabaseManager.shared.requireCurrentUserIDString()
 
             var logoPublicURL: String? = nil
 

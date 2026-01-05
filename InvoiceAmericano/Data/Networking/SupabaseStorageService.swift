@@ -16,13 +16,10 @@ enum SupabaseStorageService {
         let client = SupabaseManager.shared.client
 
         // Safely get the current user ID (lowercased for RLS match)
-        let session = try? await client.auth.session
-        guard let uid = session?.user.id.uuidString.lowercased() else {
-            throw NSError(domain: "auth", code: 401, userInfo: [NSLocalizedDescriptionKey: "User not authenticated"])
-        }
+        let uid = try SupabaseManager.shared.requireCurrentUserIDString(lowercased: true)
 
         // Consistent lowercase path to match RLS policy
-        let path = "user/\(uid)/logo.png"
+        let path = "users/\(uid)/branding/logo.png"
         print("[Storage] Uploading logo for uid=\(uid) to path=\(path)")
 
         // Upload file, allowing overwrite (upsert)
