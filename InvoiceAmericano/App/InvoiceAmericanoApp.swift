@@ -76,8 +76,17 @@ struct InvoiceAmericanoApp: App {
             .onReceive(NotificationCenter.default.publisher(for: .authDidChange)) { _ in
                 isAuthed = (AuthService.currentUserIDFast() != nil)
                 if isAuthed {
-                    Task { await recomputeOnboardingFlag() }
-                    Task { await NotificationService.syncDeviceTokenIfNeeded() }
+                    Task {
+                        await recomputeOnboardingFlag()
+                        await NotificationService.registerIfAuthorized()
+                        await NotificationService.syncDeviceTokenIfNeeded()
+                        await RealtimeService.start()
+                    }
+                } else {
+                    Task {
+                        await RealtimeService.stop()
+                        NotificationService.reset()
+                    }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .onboardingDidFinish)) { _ in
@@ -89,6 +98,7 @@ struct InvoiceAmericanoApp: App {
                     isAuthed = (AuthService.currentUserIDFast() != nil)
                     if isAuthed {
                         Task { await recomputeOnboardingFlag() }
+                        Task { await RealtimeService.start() }
                     }
                 }
             }
@@ -97,6 +107,7 @@ struct InvoiceAmericanoApp: App {
                 if isAuthed {
                     await recomputeOnboardingFlag()
                     await NotificationService.syncDeviceTokenIfNeeded()
+                    await RealtimeService.start()
                 }
             }
             .overlay(alignment: .top) {
