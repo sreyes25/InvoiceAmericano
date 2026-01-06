@@ -33,15 +33,17 @@ struct InvoiceAmericanoApp: App {
                 .execute()
                 .value
 
+            let shouldShowOnboarding = (row.display_name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             await MainActor.run {
                 self.onboardingStatusError = nil
-                self.showOnboarding = (row.display_name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                self.showOnboarding = shouldShowOnboarding
                 self.hasCompletedOnboarding = !self.showOnboarding
             }
         } catch {
             await MainActor.run {
-                self.onboardingStatusError = "Couldn’t refresh onboarding status. Showing your last saved state."
-                self.showOnboarding = !self.hasCompletedOnboarding
+                self.onboardingStatusError = "You’re offline. Using your last saved onboarding status."
+                // If we previously completed onboarding, keep the user in the app despite network errors.
+                self.showOnboarding = self.hasCompletedOnboarding ? false : true
             }
         }
     }
@@ -75,6 +77,7 @@ struct InvoiceAmericanoApp: App {
                 isAuthed = (AuthService.currentUserIDFast() != nil)
                 if isAuthed {
                     Task { await recomputeOnboardingFlag() }
+                    Task { await NotificationService.syncDeviceTokenIfNeeded() }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .onboardingDidFinish)) { _ in
@@ -93,21 +96,19 @@ struct InvoiceAmericanoApp: App {
                 AnalyticsService.track(.appLaunch)
                 if isAuthed {
                     await recomputeOnboardingFlag()
+                    await NotificationService.syncDeviceTokenIfNeeded()
                 }
             }
-            .alert(
-                "Unable to refresh onboarding status",
-                isPresented: Binding(
-                    get: { onboardingStatusError != nil },
-                    set: { if !$0 { onboardingStatusError = nil } }
-                ),
-                actions: {
-                    Button("OK", role: .cancel) { onboardingStatusError = nil }
-                },
-                message: {
-                    Text(onboardingStatusError ?? "Please try again.")
+            .overlay(alignment: .top) {
+                if let onboardingStatusError {
+                    Text(onboardingStatusError)
+                        .font(.footnote.weight(.semibold))
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 12)
+                        .background(Color.orange.opacity(0.15), in: Capsule())
+                        .padding(.top, 12)
                 }
-            )
+            }
         }
     }
 }

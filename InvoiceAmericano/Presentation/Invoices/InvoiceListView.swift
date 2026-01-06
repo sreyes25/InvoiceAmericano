@@ -226,8 +226,10 @@ struct InvoiceListView: View {
     }
 
     private func load() async {
-        isLoading = true
-        error = nil
+        await MainActor.run {
+            isLoading = true
+            error = nil
+        }
         do {
             let rows = try await InvoiceService.fetchInvoices(status: status)
             await MainActor.run {

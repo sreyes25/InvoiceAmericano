@@ -9,6 +9,7 @@ import SwiftUI
 import Foundation
 import Supabase
 import Auth
+import UserNotifications
 
 /// ✅ Single source of truth for the account display name:
 /// We use the **DBA / Business Name** collected during onboarding,
@@ -17,6 +18,7 @@ import Auth
 /// - Apple ID/email are irrelevant for the display name (used only for login & contact).
 /// - If `display_name` is empty, we fall back to a cleaned email prefix or "Your Business".
 struct AccountView: View {
+    @Environment(\.openURL) private var openURL
     // MARK: - User-facing data
     @State private var businessName: String? = nil      // ← DBA from profiles.display_name
     @State private var email: String = "you@example.com"
@@ -33,6 +35,13 @@ struct AccountView: View {
     // Stripe Connect
     @State private var stripeStatus: StripeStatus? = nil
     @State private var stripeLoading: Bool = false
+
+    // Notifications debug
+    @State private var notificationPermissionLabel: String = "Checking…"
+    @State private var hasAPNSToken: Bool = false
+    @State private var lastAPNSSyncStatus: String = "Not synced"
+    @State private var lastAPNSSyncDate: Date? = nil
+    @State private var requestingPush: Bool = false
 
     // MARK: - UI Palettes
     private let blueGrad:  [Color] = [Color.blue.opacity(0.6),  Color.indigo.opacity(0.6)]
@@ -104,6 +113,7 @@ struct AccountView: View {
             let enabled = await ProfileService.loadNotificationsEnabled()
             await MainActor.run { self.notificationsEnabled = enabled }
             await refreshStripeStatus()
+            await refreshNotificationDebug()
         }
         .onAppear {
             // refresh DBA when coming back from Branding or Profile edits
@@ -522,34 +532,96 @@ struct AccountView: View {
 
     private var settingsList: some View {
         VStack(spacing: 12) {
+            notificationToggleCard
+            notificationsDebugCard
+            supportCard
+            privacyCard
+        }
+    }
+
+    private var notificationToggleCard: some View {
+        HStack {
+            Label("Notifications", systemImage: "bell")
+            Spacer()
+            Toggle("", isOn: $notificationsEnabled)
+                .labelsHidden()
+                .onChange(of: notificationsEnabled) {
+                    Task { await ProfileService.updateNotifications(enabled: notificationsEnabled) }
+                }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.black.opacity(0.05)))
+    }
+
+    private var notificationsDebugCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Notifications", systemImage: "bell")
+                Label("Notifications status", systemImage: "bell.badge")
                 Spacer()
-                Toggle("", isOn: $notificationsEnabled)
-                    .labelsHidden()
-                    .onChange(of: notificationsEnabled) {
-                        Task { await ProfileService.updateNotifications(enabled: notificationsEnabled) }
-                    }
+                if requestingPush { ProgressView().scaleEffect(0.8) }
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Permission: \(notificationPermissionLabel)")
+                Text("APNs token saved: \(hasAPNSToken ? "Yes" : "No")")
+                Text("Last sync: \(statusLabel(status: lastAPNSSyncStatus))")
+                if let lastAPNSSyncDate {
+                    Text("Updated: \(formatted(date: lastAPNSSyncDate))")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+
+            HStack {
+                Button(requestingPush ? "Requesting…" : "Request permission") {
+                    Task { await requestPushPermissions() }
+                }
+                .buttonStyle(.bordered)
+                .disabled(requestingPush)
+
+                Spacer()
+
+                Button("Sync token") {
+                    Task { await syncPushToken() }
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.black.opacity(0.05)))
+    }
+
+    private var supportCard: some View {
+        Button {
+            openSupportEmail()
+        } label: {
+            HStack {
+                Label("Support / Contact", systemImage: "envelope")
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
             }
             .padding(14)
             .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
             .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.black.opacity(0.05)))
-
-            NavigationLink {
-                Text("Support coming soon")
-                    .navigationTitle("Help & Support")
-            } label: {
-                HStack {
-                    Label("Help & Support", systemImage: "questionmark.circle")
-                    Spacer()
-                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-                }
-                .padding(14)
-                .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
-                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.black.opacity(0.05)))
-            }
-            .buttonStyle(.plain)
         }
+        .buttonStyle(.plain)
+    }
+
+    private var privacyCard: some View {
+        Link(destination: AppSupport.privacyPolicyURL) {
+            HStack {
+                Label("Privacy Policy", systemImage: "lock.shield")
+                Spacer()
+                Image(systemName: "arrow.up.right").foregroundStyle(.tertiary)
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.black.opacity(0.05)))
+        }
+        .buttonStyle(.plain)
     }
 
     private var signOutButton: some View {
@@ -600,6 +672,68 @@ struct AccountView: View {
             return cleaned.isEmpty ? "Your Business" : cleaned.capitalized
         }
         return "Your Business"
+    }
+
+    private func refreshNotificationDebug() async {
+        let permission = await NotificationService.currentPermissionStatus()
+        let token = NotificationService.cachedDeviceToken()
+        let summary = NotificationService.lastSyncSummary()
+
+        await MainActor.run {
+            self.notificationPermissionLabel = permissionLabel(for: permission)
+            self.hasAPNSToken = !(token ?? "").isEmpty
+            self.lastAPNSSyncStatus = summary.status ?? "Not synced"
+            self.lastAPNSSyncDate = summary.date
+        }
+    }
+
+    private func requestPushPermissions() async {
+        await MainActor.run { requestingPush = true }
+        defer { Task { await MainActor.run { requestingPush = false } } }
+
+        let granted = await NotificationService.requestAuthorization()
+        if granted {
+            await NotificationService.syncDeviceTokenIfNeeded(force: true)
+        }
+        await refreshNotificationDebug()
+    }
+
+    private func syncPushToken() async {
+        await MainActor.run { requestingPush = true }
+        defer { Task { await MainActor.run { requestingPush = false } } }
+        await NotificationService.syncDeviceTokenIfNeeded(force: true)
+        await refreshNotificationDebug()
+    }
+
+    private func openSupportEmail() {
+        let subject = "InvoiceAmericano Support"
+        let mailto = "mailto:\(AppSupport.supportEmail)?subject=\(subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? subject)"
+        if let url = URL(string: mailto) {
+            openURL(url)
+        }
+    }
+
+    private func formatted(date: Date) -> String {
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .short
+        return df.string(from: date)
+    }
+
+    private func statusLabel(status: String) -> String {
+        if status.isEmpty { return "Not synced" }
+        return status
+    }
+
+    private func permissionLabel(for status: UNAuthorizationStatus) -> String {
+        switch status {
+        case .authorized: return "Authorized"
+        case .denied: return "Denied"
+        case .provisional: return "Provisional"
+        case .ephemeral: return "Ephemeral"
+        case .notDetermined: return "Not determined"
+        @unknown default: return "Unknown"
+        }
     }
 
     // MARK: - Reusable ActionCard
