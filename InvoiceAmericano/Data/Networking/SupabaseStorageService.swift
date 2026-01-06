@@ -20,7 +20,6 @@ enum SupabaseStorageService {
 
         // Consistent lowercase path to match RLS policy
         let path = "users/\(uid)/branding/logo.png"
-        print("[Storage] Uploading logo for uid=\(uid) to path=\(path)")
 
         // Upload file, allowing overwrite (upsert)
         try await client.storage
@@ -35,7 +34,10 @@ enum SupabaseStorageService {
             .from(Self.brandingBucket)
             .getPublicURL(path: path)
 
-        print("[Storage] Logo uploaded successfully. URL: \(url.absoluteString)")
+        // Avoid logging user identifiers or URLs in release builds.
+        #if DEBUG
+        print("[Storage] Logo uploaded successfully (path=\(path))")
+        #endif
         return url.absoluteString
     }
 }

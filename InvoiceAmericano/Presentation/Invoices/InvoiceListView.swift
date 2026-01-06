@@ -161,6 +161,7 @@ struct InvoiceListView: View {
         do {
             // 1) Create the invoice and get the new row
             let created = try await InvoiceService.createInvoice(from: draft)
+            AnalyticsService.track(.invoiceCreated, metadata: ["source": "invoices_tab"])
 
             // 2) Refresh the list so the new invoice shows up
             await load()
@@ -208,6 +209,14 @@ struct InvoiceListView: View {
             if senders.contains(raw) {
                 try? await InvoiceService.markSent(id: id)
                 await load()
+                let channel: String
+                switch raw {
+                case "com.apple.UIKit.activity.Message": channel = "messages"
+                case "com.apple.UIKit.activity.Mail": channel = "mail"
+                case "net.whatsapp.WhatsApp.ShareExtension": channel = "whatsapp"
+                default: channel = "share_sheet"
+                }
+                AnalyticsService.track(.invoiceSent, metadata: ["channel": channel])
             }
             await MainActor.run {
                 self.isSendingId = nil

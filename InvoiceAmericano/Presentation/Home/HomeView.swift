@@ -131,6 +131,7 @@ struct HomeView: View {
                     Task {
                         do {
                             let (newId, checkoutURL) = try await InvoiceService.createInvoice(from: draft)
+                            AnalyticsService.track(.invoiceCreated, metadata: ["source": "home"])
                             await refresh()
                             await MainActor.run {
                                 activeInvoiceId = newId            // navigate to detail after dismiss

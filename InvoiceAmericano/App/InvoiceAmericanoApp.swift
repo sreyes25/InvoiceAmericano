@@ -90,6 +90,7 @@ struct InvoiceAmericanoApp: App {
                 }
             }
             .task {
+                AnalyticsService.track(.appLaunch)
                 if isAuthed {
                     await recomputeOnboardingFlag()
                 }

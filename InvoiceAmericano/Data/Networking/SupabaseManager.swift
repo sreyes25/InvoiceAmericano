@@ -65,9 +65,12 @@ final class SupabaseManager {
         supabaseURLString = supabaseURLString.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
         anon = anon.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
 
-        // DEBUG: Show what we actually have at runtime
-        print("🔎 SUPABASE_URL (runtime): '\(supabaseURLString)'")
+        #if DEBUG
+        // DEBUG: Avoid logging full URLs or keys; only surface host + presence for troubleshooting.
+        let host = URL(string: supabaseURLString)?.host ?? "<invalid>"
+        print("🔎 SUPABASE host: \(host)")
         print("🔎 SUPABASE_ANON_KEY present: \(anon.isEmpty ? "NO" : "YES")")
+        #endif
 
         // Validate URL: must start with http(s) and have a host
         guard
