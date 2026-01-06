@@ -18,6 +18,7 @@ enum NotificationService {
     private static let defaults = UserDefaults.standard
     private static let tokenKey = "apnsDeviceToken"
     private static let lastSyncedTokenKey = "apnsLastSyncedToken"
+    private static let lastSyncedUserIDKey = "apnsLastSyncedUserID"
     private static let lastSyncResultKey = "apnsLastSyncResult"
     private static let lastSyncDateKey = "apnsLastSyncDate"
 
@@ -69,7 +70,8 @@ enum NotificationService {
         guard let uid = SupabaseManager.shared.currentUserIDString() else { return }
 
         let lastToken = defaults.string(forKey: lastSyncedTokenKey)
-        if !force, lastToken == token { return }
+        let lastUserID = defaults.string(forKey: lastSyncedUserIDKey)
+        if !force, lastToken == token, lastUserID == uid { return }
 
         struct Payload: Encodable {
             let user_id: String
@@ -84,6 +86,7 @@ enum NotificationService {
                 .execute()
 
             defaults.set(token, forKey: lastSyncedTokenKey)
+            defaults.set(uid, forKey: lastSyncedUserIDKey)
             defaults.set("success", forKey: lastSyncResultKey)
             defaults.set(Date(), forKey: lastSyncDateKey)
         } catch {
@@ -98,6 +101,7 @@ enum NotificationService {
 
     static func reset() {
         defaults.removeObject(forKey: lastSyncedTokenKey)
+        defaults.removeObject(forKey: lastSyncedUserIDKey)
         defaults.removeObject(forKey: lastSyncResultKey)
         defaults.removeObject(forKey: lastSyncDateKey)
     }

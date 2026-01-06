@@ -251,8 +251,10 @@ private struct NotificationsStep: View {
     private func request() async {
         await MainActor.run { requesting = true; error = nil }
         do {
-            let granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
-            // You’ll still need to register for remote notifications in AppDelegate/Scene for APNs tokens.
+            let granted = await NotificationService.requestAuthorization()
+            if granted {
+                await NotificationService.syncDeviceTokenIfNeeded(force: true)
+            }
             await MainActor.run {
                 requesting = false
                 if !granted {
