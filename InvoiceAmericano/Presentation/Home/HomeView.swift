@@ -144,7 +144,7 @@ struct HomeView: View {
                                 }
                             }
                         } catch {
-                            await MainActor.run { errorText = error.localizedDescription }
+                            await MainActor.run { errorText = error.friendlyMessage }
                         }
                     }
                 })
@@ -476,7 +476,7 @@ struct HomeView: View {
                 await UIApplication.shared.open(linkURL)
             }
         } catch {
-            await MainActor.run { self.errorText = error.localizedDescription }
+            await MainActor.run { self.errorText = error.friendlyMessage }
         }
     }
 
@@ -790,7 +790,7 @@ struct HomeView: View {
             }
         } catch {
             await MainActor.run {
-                self.errorText = error.localizedDescription
+                self.errorText = error.friendlyMessage
                 self.isLoading = false
             }
         }

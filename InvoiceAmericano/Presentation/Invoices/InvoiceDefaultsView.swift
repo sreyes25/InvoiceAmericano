@@ -146,7 +146,7 @@ struct InvoiceDefaultsView: View {
                 }
             }
         } catch {
-            await MainActor.run { errorText = "Failed to load defaults: \(error.localizedDescription)" }
+            await MainActor.run { errorText = "Failed to load defaults: \(error.friendlyMessage)" }
         }
     }
 
@@ -164,7 +164,7 @@ struct InvoiceDefaultsView: View {
             )
             await MainActor.run { dismiss() }
         } catch {
-            await MainActor.run { errorText = "Save failed: \(error.localizedDescription)" }
+            await MainActor.run { errorText = "Save failed: \(error.friendlyMessage)" }
         }
     }
 }

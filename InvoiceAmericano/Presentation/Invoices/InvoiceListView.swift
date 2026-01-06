@@ -185,7 +185,7 @@ struct InvoiceListView: View {
             }
         } catch {
             await MainActor.run {
-                self.error = error.localizedDescription
+                self.error = error.friendlyMessage
             }
         }
     }
@@ -227,7 +227,7 @@ struct InvoiceListView: View {
             }
         } catch {
             await MainActor.run {
-                self.error = error.localizedDescription
+                self.error = error.friendlyMessage
                 self.isLoading = false
             }
         }
@@ -277,7 +277,7 @@ struct InvoiceListView: View {
                 self.sharePayload = SharePayload(items: items)
             }
         } catch {
-            await MainActor.run { self.error = error.localizedDescription }
+            await MainActor.run { self.error = error.friendlyMessage }
         }
     }
 }
