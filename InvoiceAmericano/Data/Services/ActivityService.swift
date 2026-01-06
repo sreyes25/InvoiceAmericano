@@ -13,7 +13,6 @@ private struct ActivityInsert: Encodable {
     let invoice_id: UUID
     let event: String
     let metadata: [String: String]?
-    let user_id: String
 }
 
 enum ActivityService {
@@ -24,7 +23,6 @@ enum ActivityService {
     static func markAsRead(_ ids: [UUID]) async {
         guard !ids.isEmpty else { return }
         let client = SupabaseManager.shared.client
-        guard let uid = SupabaseManager.shared.currentUserIDString() else { return }
         let now = ISO8601DateFormatter().string(from: Date())
 
         do {
@@ -32,7 +30,6 @@ enum ActivityService {
                 .from("invoice_activity")
                 .update(["read_at": now])
                 .in("id", values: ids.map { $0.uuidString })
-                .eq("user_id", value: uid)
                 .select()
                 .execute()
             // After a successful update, broadcast so Home badge refreshes
@@ -59,7 +56,6 @@ enum ActivityService {
         let now = f.string(from: Date())
         let payload = ReadUpdate(read_at: now)
         let client = SupabaseManager.shared.client
-        guard let uid = SupabaseManager.shared.currentUserIDString() else { return }
         let stringIds = ids.map { $0.uuidString }
 
         // Attempt bulk update first.
@@ -68,7 +64,6 @@ enum ActivityService {
                 .from("invoice_activity")
                 .update(payload)
                 .in("id", values: stringIds)
-                .eq("user_id", value: uid)
                 .execute()
             return
         } catch {
@@ -79,7 +74,6 @@ enum ActivityService {
                         .from("invoice_activity")
                         .update(payload)
                         .eq("id", value: id)
-                        .eq("user_id", value: uid)
                         .execute()
                 } catch {
                     print("⚠️ markActivitiesRead fallback failed for \(id):", error)
@@ -96,7 +90,6 @@ enum ActivityService {
                 .from("invoice_activity")
                 .select("id, invoices!inner(user_id)", head: true, count: .exact)
                 .is("read_at", value: nil)
-                .eq("user_id", value: uid.uuidString)
                 .eq("invoices.user_id", value: uid.uuidString)
                 .execute()
             return response.count ?? 0
@@ -109,7 +102,6 @@ enum ActivityService {
     // Recent joined activity rows for the dashboard preview
     static func fetchRecentActivityJoined(limit: Int = 5) async throws -> [ActivityJoined] {
         let client = SupabaseManager.shared.client
-        let uid = try requireUID()
         // Make sure your ActivityJoined matches these columns
         let rows: [ActivityJoined] = try await client
           .from("invoice_activity")
@@ -124,7 +116,6 @@ enum ActivityService {
               client:clients(name)
             )
           """)
-          .eq("user_id", value: uid)
           .order("created_at", ascending: false)
           .limit(limit)
           .execute()
@@ -137,7 +128,6 @@ enum ActivityService {
     static func debugDumpRecentActivityJSON(limit: Int = 5) async {
         do {
             let client = SupabaseManager.shared.client
-            let uid = try requireUID()
             let select = """
                 id,
                     invoice_id,
@@ -152,7 +142,6 @@ enum ActivityService {
             let resp = try await client
                 .from("invoice_activity")
                 .select(select)
-                .eq("user_id", value: uid)
                 .order("created_at", ascending: false)
                 .limit(limit)
                 .execute()
@@ -171,12 +160,10 @@ enum ActivityService {
 
     static func fetchPage(offset: Int = 0, limit: Int = 50) async throws -> [ActivityEvent] {
          let to = offset + limit - 1
-         let uid = try requireUID()
          let response = try await SupabaseManager.shared.client
              .from("invoice_activity")
              .select()
              .is("deleted_at", value: nil)
-             .eq("user_id", value: uid)
              .order("created_at", ascending: false)
              .range(from: offset, to: to)
              .execute()
@@ -196,11 +183,9 @@ enum ActivityService {
         )
         """
 
-        let uid = try requireUID()
         let resp = try await SupabaseManager.shared.client
             .from("invoice_activity")
             .select(select)
-            .eq("user_id", value: uid)
             .order("created_at", ascending: false)
             .range(from: offset, to: to)
             .execute()
@@ -210,7 +195,6 @@ enum ActivityService {
     
     /// All activity (most recent first)
     static func fetchAll(limit: Int = 200) async throws -> [ActivityEvent] {
-        let uid = try requireUID()
         let resp = try await SupabaseManager.shared.client
             .from("invoice_activity")
             .select("""
@@ -222,7 +206,6 @@ enum ActivityService {
                 created_at,
                 inv:invoices!invoice_activity_invoice_id_fkey(number, client:clients(name))
             """)
-            .eq("user_id", value: uid)
             .order("created_at", ascending: false)
             .limit(limit)
             .execute()
@@ -233,7 +216,6 @@ enum ActivityService {
 
     /// Activity for a single invoice (most recent first)
     static func fetch(invoiceId: UUID, limit: Int = 200) async throws -> [ActivityEvent] {
-        let uid = try requireUID()
         return try await SupabaseManager.shared.client
             .from("invoice_activity")
             .select("""
@@ -246,7 +228,6 @@ enum ActivityService {
                 inv:invoices!invoice_activity_invoice_id_fkey(number, client:clients(name))
             """)
             .eq("invoice_id", value: invoiceId.uuidString)
-            .eq("user_id", value: uid)
             .is("deleted_at", value: nil)
             .order("created_at", ascending: false)
             .limit(limit)
@@ -256,13 +237,11 @@ enum ActivityService {
 
     /// Log a new event (optional metadata)
     static func log(invoiceId: UUID, event: String, metadata: [String: String]? = nil) async throws {
-        let uid = try requireUID()
-        let payload = ActivityInsert(invoice_id: invoiceId, event: event, metadata: metadata, user_id: uid)
+        let payload = ActivityInsert(invoice_id: invoiceId, event: event, metadata: metadata)
         _ = try await SupabaseManager.shared.client
-            .from("invoice_activity")
-            .insert(payload)
-            .eq("user_id", value: uid)
-            .execute()
+          .from("invoice_activity")
+          .insert(payload)
+          .execute()
     }
 
     static func countUnread() async throws -> Int {
@@ -273,33 +252,18 @@ enum ActivityService {
             .select("id, invoices!inner(user_id)", head: true, count: .exact)
             .is("read_at", value: nil)
             .is("deleted_at", value: nil)
-            .eq("user_id", value: uid.uuidString)
             .eq("invoices.user_id", value: uid.uuidString)
             .execute()
         return resp.count ?? 0
     }
 
-    static func markAllAsRead() async throws {
-        let nowISO = ISO8601DateFormatter().string(from: Date())
-        let uid = try requireUID()
-        _ = try await SupabaseManager.shared.client
-            .from("invoice_activity")
-            .update(["read_at": nowISO])
-            .is("read_at", value: nil)
-            .is("deleted_at", value: nil)
-            .eq("user_id", value: uid)
-            .execute()
-    }
-
     // MARK: - Soft Delete (update deleted_at)
        static func delete(id: UUID) async throws {
            let nowISO = ISO8601DateFormatter().string(from: Date())
-           let uid = try requireUID()
            _ = try await SupabaseManager.shared.client
                .from("invoice_activity")
                .update(["deleted_at": nowISO])
                .eq("id", value: id.uuidString)
-               .eq("user_id", value: uid)
                .execute()
        }
 
