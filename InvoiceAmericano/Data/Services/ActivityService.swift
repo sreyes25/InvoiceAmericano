@@ -237,7 +237,6 @@ enum ActivityService {
 
     /// Log a new event (optional metadata)
     static func log(invoiceId: UUID, event: String, metadata: [String: String]? = nil) async throws {
-        let uid = try requireUID()
         let payload = ActivityInsert(invoice_id: invoiceId, event: event, metadata: metadata)
         _ = try await SupabaseManager.shared.client
           .from("invoice_activity")

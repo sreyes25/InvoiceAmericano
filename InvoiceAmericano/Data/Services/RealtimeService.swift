@@ -19,7 +19,7 @@ enum RealtimeService {
         // Avoid duplicates
         if channel != nil { return }
 
-        guard let uid = SupabaseManager.shared.currentUserIDString() else {
+        guard SupabaseManager.shared.currentUserIDString() != nil else {
             print("⚠️ Realtime start skipped: missing user id")
             return
         }
@@ -37,7 +37,7 @@ enum RealtimeService {
             // payload.record is [String: AnyJSON]
             let row = payload.record
 
-            let eventString = extractEvent(row)
+            let eventString = RealtimeService.extractEvent(row)
 
             // Notify on main thread
             DispatchQueue.main.async {
@@ -78,14 +78,14 @@ extension Notification.Name {
 }
 
 extension RealtimeService {
-    static func extractEvent(_ record: [String: AnyJSON]) -> String {
+    nonisolated static func extractEvent(_ record: [String: AnyJSON]) -> String {
         guard let any = record["event"] else { return "" }
         if let s = any.stringValue { return s }
         if let s = any.value as? String { return s }
         return String(describing: any)
     }
 
-    static func notificationMessage(for event: String) -> (title: String, body: String)? {
+    nonisolated static func notificationMessage(for event: String) -> (title: String, body: String)? {
         switch event {
         case "paid":
             return ("Invoice Paid", "A client just paid an invoice.")
