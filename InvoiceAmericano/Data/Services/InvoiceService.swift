@@ -71,6 +71,10 @@ private struct CreateCheckoutRequest: Encodable {
     let user_id: String
 }
 
+private struct CreateCheckoutResponse: Decodable {
+    let checkout_url: String?
+}
+
 private struct _CheckoutURLRow: Decodable { let checkout_url: String? }
 private struct _SentUpdate: Encodable { let status: String; let sent_at: String }
 
@@ -176,10 +180,15 @@ enum InvoiceService {
 
         let rows: [InvoiceRow] = try await query.execute().value
 
+        return filterInvoices(rows, status: status)
+    }
+
+    /// Applies the same filtering used on the invoice list screen, separated for testing.
+    static func filterInvoices(_ rows: [InvoiceRow], status: InvoiceStatus, today: Date = Date()) -> [InvoiceRow] {
         // Client-side filter to support "overdue" virtual tab
         if case .overdue = status {
             let cal = Calendar.current
-            let today = cal.startOfDay(for: Date())
+            let today = cal.startOfDay(for: today)
 
             let iso = ISO8601DateFormatter()
             var ymd: DateFormatter {
@@ -276,63 +285,31 @@ enum InvoiceService {
 
         // ---- 7) Insert line items ----
         let itemsPayload = draft.items.map { item in
-            let cleanedTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let cleanedDesc  = item.description.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            let isPlaceholderTitle = cleanedTitle.isEmpty || cleanedTitle == "Title"
-            let isPlaceholderDesc  = cleanedDesc.isEmpty || cleanedDesc == "Description"
-
-            // TITLE + DESCRIPTION rules:
-            // Case A: Title + Description → save both
-            // Case B: Description only → title = nil
-            // Case C: Title only → description = title
-            // Case D: Both empty → filler
-            let finalTitle: String?
-            let finalDescription: String
-
-            if !isPlaceholderTitle && !isPlaceholderDesc {
-                // both valid
-                finalTitle = cleanedTitle
-                finalDescription = cleanedDesc
-
-            } else if isPlaceholderTitle && !isPlaceholderDesc {
-                // only description provided
-                finalTitle = nil
-                finalDescription = cleanedDesc
-
-            } else if !isPlaceholderTitle && isPlaceholderDesc {
-      
-                // only title provided
-                finalTitle = cleanedTitle
-                finalDescription = cleanedTitle
-
-            } else {
-                // both empty
-                finalTitle = nil
-                finalDescription = "Item"
-            }
-
+            let normalized = normalizeLineItem(item)
             return NewLineItemPayload(
                 invoice_id: invoiceId,
-                title: finalTitle,
-                description: finalDescription,
-                qty: max(1, item.quantity),
-                unit_price: item.unitPrice,
-                amount: Double(max(1, item.quantity)) * item.unitPrice
+                title: normalized.title,
+                description: normalized.description,
+                qty: normalized.quantity,
+                unit_price: normalized.unitPrice,
+                amount: normalized.amount
             )
         }
         _ = try await client.from("line_items").insert(itemsPayload).execute()
 
-        // ---- 8) Optionally create checkout (ignore response body if function not deployed) ----
-        let checkoutURL: URL? = nil
+        // ---- 8) Optionally create checkout and capture returned URL ----
+        var checkoutURL: URL? = nil
         do {
-            _ = try await client.functions.invoke(
+            let response: CreateCheckoutResponse = try await client.functions.invoke(
                 "create_checkout",
                 options: FunctionInvokeOptions(
                     headers: ["Content-Type": "application/json"],
                     body: CreateCheckoutRequest(invoice_id: invoiceId.uuidString, user_id: uid)
                 )
             )
+            if let s = response.checkout_url, let u = URL(string: s) {
+                checkoutURL = u
+            }
         } catch {
             // ignore if function not deployed yet
         }
@@ -404,5 +381,51 @@ enum InvoiceService {
             .execute()
             .value
         return detail
+    }
+}
+
+extension InvoiceService {
+    /// Normalizes the user-provided line item draft into the payload saved to Supabase.
+    static func normalizeLineItem(_ item: LineItemDraft) -> (title: String?, description: String, quantity: Int, unitPrice: Double, amount: Double) {
+        let cleanedTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedDesc  = item.description.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let isPlaceholderTitle = cleanedTitle.isEmpty || cleanedTitle == "Title"
+        let isPlaceholderDesc  = cleanedDesc.isEmpty || cleanedDesc == "Description"
+
+        // TITLE + DESCRIPTION rules:
+        // Case A: Title + Description → save both
+        // Case B: Description only → title = nil
+        // Case C: Title only → description = title
+        // Case D: Both empty → filler
+        let finalTitle: String?
+        let finalDescription: String
+
+        if !isPlaceholderTitle && !isPlaceholderDesc {
+            // both valid
+            finalTitle = cleanedTitle
+            finalDescription = cleanedDesc
+
+        } else if isPlaceholderTitle && !isPlaceholderDesc {
+            // only description provided
+            finalTitle = nil
+            finalDescription = cleanedDesc
+
+        } else if !isPlaceholderTitle && isPlaceholderDesc {
+
+            // only title provided
+            finalTitle = cleanedTitle
+            finalDescription = cleanedTitle
+
+        } else {
+            // both empty
+            finalTitle = nil
+            finalDescription = "Item"
+        }
+
+        let qty = max(1, item.quantity)
+        let amount = Double(qty) * item.unitPrice
+
+        return (title: finalTitle, description: finalDescription, quantity: qty, unitPrice: item.unitPrice, amount: amount)
     }
 }

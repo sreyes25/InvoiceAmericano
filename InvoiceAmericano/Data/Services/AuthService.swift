@@ -15,6 +15,9 @@ enum AuthService {
     /// IMPORTANT: This must be whitelisted in Supabase Dashboard → Auth → URL Configuration → Redirect URLs
     private static let redirectURL = URL(string: "invoiceamericano://auth-callback")!
 
+    /// Exposed for tests to validate the configured redirect target.
+    static var defaultRedirectURL: URL { redirectURL }
+
     // MARK: - Email/Password
     static func signUp(email: String, password: String) async throws {
         _ = try await SupabaseManager.shared.client.auth.signUp(

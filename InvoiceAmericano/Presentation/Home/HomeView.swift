@@ -9,6 +9,7 @@ import SwiftUI
 import SceneKit
 import Supabase
 import Auth
+import UIKit
 
 // Fallback wrapper so NavigationStack can push an invoice preview.
 // If your real screen is `InvoiceDetailView`, this forwards to it.
@@ -17,6 +18,11 @@ struct InvoicePreviewView: View {
     var body: some View {
         InvoiceDetailView(invoiceId: invoiceId)
     }
+}
+
+private struct PayLinkPayload: Identifiable {
+    let id = UUID()
+    let url: URL
 }
 
 struct HomeView: View {
@@ -73,6 +79,7 @@ struct HomeView: View {
     @State private var showInvoicesSheet = false
     @State private var showActivitySheet = false
     @State private var showAISheet = false
+    @State private var payLinkPayload: PayLinkPayload? = nil
 
     // Unread activity count (for badge)
     @State private var unreadCount: Int = 0
@@ -123,11 +130,18 @@ struct HomeView: View {
                 NewInvoiceView(onSaved: { draft in
                     Task {
                         do {
-                            let (newId, _) = try await InvoiceService.createInvoice(from: draft)
+                            let (newId, checkoutURL) = try await InvoiceService.createInvoice(from: draft)
                             await refresh()
                             await MainActor.run {
                                 activeInvoiceId = newId            // navigate to detail after dismiss
                                 showNewInvoice = false
+                            }
+
+                            if let checkoutURL {
+                                try? await Task.sleep(nanoseconds: 250_000_000) // allow sheet to dismiss smoothly
+                                await MainActor.run {
+                                    payLinkPayload = PayLinkPayload(url: checkoutURL)
+                                }
                             }
                         } catch {
                             await MainActor.run { errorText = error.localizedDescription }
@@ -137,6 +151,12 @@ struct HomeView: View {
                 .navigationTitle("New Invoice")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            }
+        }
+
+        .sheet(item: $payLinkPayload) { payload in
+            ActivitySheet(items: ["Pay this invoice", payload.url]) { _, _ in
+                payLinkPayload = nil
             }
         }
         
@@ -2265,5 +2285,20 @@ struct ThemedNewInvoiceSheet: View {
             .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
         }
     }
+}
+
+private struct ActivitySheet: UIViewControllerRepresentable {
+    let items: [Any]
+    var onComplete: ((Bool, UIActivity.ActivityType?) -> Void)? = nil
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        vc.completionWithItemsHandler = { activityType, completed, _, _ in
+            onComplete?(completed, activityType)
+        }
+        return vc
+    }
+
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
 

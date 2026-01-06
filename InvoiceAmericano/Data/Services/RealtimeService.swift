@@ -37,13 +37,7 @@ enum RealtimeService {
             // payload.record is [String: AnyJSON]
             let row = payload.record
 
-            // Extract event type
-            var eventString = ""
-            if let any = row["event"] {
-                if let s = any.stringValue { eventString = s }
-                else if let s = any.value as? String { eventString = s }
-                else { eventString = String(describing: any) }
-            }
+            let eventString = extractEvent(row)
 
             // Notify on main thread
             DispatchQueue.main.async {
@@ -53,17 +47,9 @@ enum RealtimeService {
                     userInfo: ["event": eventString]
                 )
 
-                switch eventString {
-                case "paid":
-                    LocalNotify.show(title: "Invoice Paid", body: "A client just paid an invoice.")
-                case "overdue":
-                    LocalNotify.show(title: "Invoice Overdue", body: "An invoice is now overdue.")
-                case "due_soon":
-                    LocalNotify.show(title: "Invoice Due Soon", body: "An invoice is due soon.")
-                default:
-                    if !eventString.isEmpty {
-                        LocalNotify.show(title: "Invoice Activity", body: "New event: \(eventString)")
-                    }
+                let message = notificationMessage(for: eventString)
+                if let message {
+                    LocalNotify.show(title: message.title, body: message.body)
                 }
             }
         }
@@ -89,4 +75,28 @@ enum RealtimeService {
 
 extension Notification.Name {
     static let activityInserted = Notification.Name("activityInserted")
+}
+
+extension RealtimeService {
+    static func extractEvent(_ record: [String: AnyJSON]) -> String {
+        guard let any = record["event"] else { return "" }
+        if let s = any.stringValue { return s }
+        if let s = any.value as? String { return s }
+        return String(describing: any)
+    }
+
+    static func notificationMessage(for event: String) -> (title: String, body: String)? {
+        switch event {
+        case "paid":
+            return ("Invoice Paid", "A client just paid an invoice.")
+        case "overdue":
+            return ("Invoice Overdue", "An invoice is now overdue.")
+        case "due_soon":
+            return ("Invoice Due Soon", "An invoice is due soon.")
+        case "":
+            return nil
+        default:
+            return ("Invoice Activity", "New event: \(event)")
+        }
+    }
 }

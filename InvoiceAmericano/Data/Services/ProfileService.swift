@@ -32,18 +32,17 @@ enum ProfileService {
             let session = try? await client.auth.session
             guard let uid = session?.user.id.uuidString else { return true }
 
-            struct Row: Decodable { let notifications_enabled: Bool? }
-            do {
-                let rows: [Row] = try await client
-                    .from("settings")
-                    .select("notifications_enabled")
-                    .eq("user_id", value: uid)
-                    .limit(1)
-                    .execute()
-                    .value
-                return rows.first?.notifications_enabled ?? true
-            } catch { return true }
-        }
+        do {
+            let rows: [ProfileSettingsRow] = try await client
+                .from("settings")
+                .select("notifications_enabled")
+                .eq("user_id", value: uid)
+                .limit(1)
+                .execute()
+                .value
+            return resolveNotificationsEnabled(from: rows)
+        } catch { return true }
+    }
 
         static func updateNotifications(enabled: Bool) async {
             let client = SupabaseManager.shared.client
@@ -67,5 +66,14 @@ enum ProfileService {
             .update(Patch(full_name: name))
             .eq("id", value: uid)
             .execute()
+    }
+}
+
+struct ProfileSettingsRow: Decodable { let notifications_enabled: Bool? }
+
+extension ProfileService {
+    /// Extracts the notifications toggle value, defaulting to true when rows are missing or null.
+    static func resolveNotificationsEnabled(from rows: [ProfileSettingsRow]) -> Bool {
+        rows.first?.notifications_enabled ?? true
     }
 }

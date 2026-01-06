@@ -15,6 +15,8 @@ struct InvoiceAmericanoApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var isAuthed = (AuthService.currentUserIDFast() != nil)
     @State private var showOnboarding = false
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
+    @State private var onboardingStatusError: String?
 
     private func recomputeOnboardingFlag() async {
         do {
@@ -32,10 +34,15 @@ struct InvoiceAmericanoApp: App {
                 .value
 
             await MainActor.run {
+                self.onboardingStatusError = nil
                 self.showOnboarding = (row.display_name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                self.hasCompletedOnboarding = !self.showOnboarding
             }
         } catch {
-            await MainActor.run { self.showOnboarding = true }
+            await MainActor.run {
+                self.onboardingStatusError = "Couldn’t refresh onboarding status. Showing your last saved state."
+                self.showOnboarding = !self.hasCompletedOnboarding
+            }
         }
     }
 
@@ -87,6 +94,19 @@ struct InvoiceAmericanoApp: App {
                     await recomputeOnboardingFlag()
                 }
             }
+            .alert(
+                "Unable to refresh onboarding status",
+                isPresented: Binding(
+                    get: { onboardingStatusError != nil },
+                    set: { if !$0 { onboardingStatusError = nil } }
+                ),
+                actions: {
+                    Button("OK", role: .cancel) { onboardingStatusError = nil }
+                },
+                message: {
+                    Text(onboardingStatusError ?? "Please try again.")
+                }
+            )
         }
     }
 }
