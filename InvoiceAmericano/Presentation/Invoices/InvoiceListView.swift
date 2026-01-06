@@ -161,6 +161,7 @@ struct InvoiceListView: View {
         do {
             // 1) Create the invoice and get the new row
             let created = try await InvoiceService.createInvoice(from: draft)
+            AnalyticsService.track(.invoiceCreated, metadata: ["source": "invoices_tab"])
 
             // 2) Refresh the list so the new invoice shows up
             await load()
@@ -185,7 +186,7 @@ struct InvoiceListView: View {
             }
         } catch {
             await MainActor.run {
-                self.error = error.localizedDescription
+                self.error = error.friendlyMessage
             }
         }
     }
@@ -208,6 +209,14 @@ struct InvoiceListView: View {
             if senders.contains(raw) {
                 try? await InvoiceService.markSent(id: id)
                 await load()
+                let channel: String
+                switch raw {
+                case "com.apple.UIKit.activity.Message": channel = "messages"
+                case "com.apple.UIKit.activity.Mail": channel = "mail"
+                case "net.whatsapp.WhatsApp.ShareExtension": channel = "whatsapp"
+                default: channel = "share_sheet"
+                }
+                AnalyticsService.track(.invoiceSent, metadata: ["channel": channel])
             }
             await MainActor.run {
                 self.isSendingId = nil
@@ -227,7 +236,7 @@ struct InvoiceListView: View {
             }
         } catch {
             await MainActor.run {
-                self.error = error.localizedDescription
+                self.error = error.friendlyMessage
                 self.isLoading = false
             }
         }
@@ -277,7 +286,7 @@ struct InvoiceListView: View {
                 self.sharePayload = SharePayload(items: items)
             }
         } catch {
-            await MainActor.run { self.error = error.localizedDescription }
+            await MainActor.run { self.error = error.friendlyMessage }
         }
     }
 }

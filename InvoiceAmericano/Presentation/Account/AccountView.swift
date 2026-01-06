@@ -28,6 +28,7 @@ struct AccountView: View {
     @State private var totalInvoices: Int = 0
     @State private var paidInvoices: Int = 0
     @State private var outstanding: Double = 0
+    @State private var errorText: String? = nil
 
     // Stripe Connect
     @State private var stripeStatus: StripeStatus? = nil
@@ -65,6 +66,12 @@ struct AccountView: View {
             VStack(spacing: 20) {
                 header
                 summaryCards
+                if let errorText {
+                    Text(errorText)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 paymentsCard
                 actionCards
                 settingsList
@@ -88,8 +95,11 @@ struct AccountView: View {
                     totalInvoices = s.totalCount
                     paidInvoices = s.paidCount
                     outstanding  = s.outstandingAmount
+                    errorText = nil
                 }
-            } catch { /* ignore in v1 */ }
+            } catch {
+                await MainActor.run { errorText = error.friendlyMessage }
+            }
 
             let enabled = await ProfileService.loadNotificationsEnabled()
             await MainActor.run { self.notificationsEnabled = enabled }
@@ -352,6 +362,8 @@ struct AccountView: View {
             // If `status` is nil (offline / error), keep the last known Stripe state.
             if let status {
                 self.stripeStatus = status
+            } else if self.stripeStatus == nil {
+                self.errorText = self.errorText ?? "You’re offline. Stripe status may be out of date."
             }
             self.stripeLoading = false
         }

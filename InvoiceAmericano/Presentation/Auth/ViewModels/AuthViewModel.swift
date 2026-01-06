@@ -79,10 +79,13 @@ final class AuthViewModel: ObservableObject {
         validateFields(forSignUp: true)
         guard canSubmitSignUp else { return }
 
+        AnalyticsService.track(.authSignUpStarted, metadata: ["method": "password"])
+
         await run("Sign up failed") { [self] in
             try await AuthService.signUp(email: self.email, password: self.password)
             self.banner = "Check your email to confirm your account."
             NotificationCenter.default.post(name: .authDidChange, object: nil)
+            AnalyticsService.track(.authSignUpSucceeded, metadata: ["method": "password"])
         }
     }
 
@@ -92,11 +95,14 @@ final class AuthViewModel: ObservableObject {
         validateFields(forSignUp: false)
         guard canSubmitSignIn else { return }
 
+        AnalyticsService.track(.authSignInStarted, metadata: ["method": "password"])
+
         await run("Sign in failed") { [self] in
             try await AuthService.signIn(email: self.email, password: self.password)
             // Broadcast and refresh local auth state
             NotificationCenter.default.post(name: .authDidChange, object: nil)
             self.refreshAuthNow()
+            AnalyticsService.track(.authSignInSucceeded, metadata: ["method": "password"])
         }
     }
 
@@ -104,11 +110,13 @@ final class AuthViewModel: ObservableObject {
     /// UI calls this from the "Continue with Apple" button.
     func signInWithApple() async {
         guard gateAction() else { return }
+        AnalyticsService.track(.authSignInStarted, metadata: ["method": "apple"])
         await run("Apple sign-in failed") { [self] in
             try await AuthService.signInWithApple()
             // Broadcast and refresh local auth state
             NotificationCenter.default.post(name: .authDidChange, object: nil)
             self.refreshAuthNow()
+            AnalyticsService.track(.authSignInSucceeded, metadata: ["method": "apple"])
         }
     }
 
@@ -117,6 +125,7 @@ final class AuthViewModel: ObservableObject {
         await run("Sign out failed") { [self] in
             try await AuthService.signOut()
             self.isAuthed = false
+            AnalyticsService.track(.authSignedOut)
         }
     }
 

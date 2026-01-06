@@ -159,6 +159,7 @@ struct OnboardingFlow: View {
                 // Mark onboarding as complete locally so we don't show it again offline
                 hasCompletedOnboarding = true
                 isSaving = false
+                AnalyticsService.track(.onboardingCompleted, metadata: ["status": "success"])
                 NotificationCenter.default.post(name: .onboardingDidFinish, object: nil)
                 dismiss()  // close onboarding
             }

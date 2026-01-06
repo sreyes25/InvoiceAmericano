@@ -131,6 +131,7 @@ struct HomeView: View {
                     Task {
                         do {
                             let (newId, checkoutURL) = try await InvoiceService.createInvoice(from: draft)
+                            AnalyticsService.track(.invoiceCreated, metadata: ["source": "home"])
                             await refresh()
                             await MainActor.run {
                                 activeInvoiceId = newId            // navigate to detail after dismiss
@@ -144,7 +145,7 @@ struct HomeView: View {
                                 }
                             }
                         } catch {
-                            await MainActor.run { errorText = error.localizedDescription }
+                            await MainActor.run { errorText = error.friendlyMessage }
                         }
                     }
                 })
@@ -476,7 +477,7 @@ struct HomeView: View {
                 await UIApplication.shared.open(linkURL)
             }
         } catch {
-            await MainActor.run { self.errorText = error.localizedDescription }
+            await MainActor.run { self.errorText = error.friendlyMessage }
         }
     }
 
@@ -790,7 +791,7 @@ struct HomeView: View {
             }
         } catch {
             await MainActor.run {
-                self.errorText = error.localizedDescription
+                self.errorText = error.friendlyMessage
                 self.isLoading = false
             }
         }
