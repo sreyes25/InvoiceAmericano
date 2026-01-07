@@ -9,7 +9,6 @@
 //
 
 import SwiftUI
-import UserNotifications
 
 struct ActivityAllView: View {
     @State private var items: [ActivityJoined] = []
@@ -17,6 +16,7 @@ struct ActivityAllView: View {
     @State private var loadingMore = false
     @State private var reachedEnd = false
     @State private var error: String?
+    @State private var didMarkRead = false
 
     // Page size for “More” button
     private let pageSize = 20
@@ -84,34 +84,19 @@ struct ActivityAllView: View {
         .navigationTitle("Activity")
         // MARK: Mark visible rows as read (server + optimistic), then notify Home
         .task {
-            // 🔴 CLEAR APP ICON BADGE
-            if #available(iOS 17.0, *) {
-                try? await UNUserNotificationCenter.current().setBadgeCount(0)
-            } else {
-                UIApplication.shared.applicationIconBadgeNumber = 0
-            }
+            guard !didMarkRead else { return }
+            didMarkRead = true
             await load()
-            
 
-            // Find unread rows currently shown
-            let unreadIndexes = items.enumerated().compactMap { idx, ev in
-                ev.read_at == nil ? idx : nil
-            }
-            let unreadIDs = unreadIndexes.map { items[$0].id }
+            let count = await ActivityService.markAllUnreadForCurrentUser()
+            await NotificationService.setAppBadgeCount(count)
 
-            // Kick off server update
-            Task { await ActivityService.markAsRead(unreadIDs) }
-            
-            // Optimistically flip local state so blue dots disappear now
             let now = ISO8601DateFormatter().string(from: Date())
-            for i in unreadIndexes {
+            for i in items.indices where items[i].read_at == nil {
                 items[i].read_at = now
             }
-            // After optimistic local clear + server mark:
-            Task { await recalcAndBroadcastUnread() }
 
-            // Ask Home to recompute badge (it will pull fresh count)
-            NotificationCenter.default.post(name: .activityUnreadChanged, object: nil)
+            await recalcAndBroadcastUnread()
         }
         .navigationDestination(for: UUID.self) { invoiceId in
             InvoiceDetailView(invoiceId: invoiceId)
@@ -120,6 +105,7 @@ struct ActivityAllView: View {
     
     private func recalcAndBroadcastUnread() async {
         let n = (try? await ActivityService.countUnread()) ?? 0
+        await NotificationService.setAppBadgeCount(n)
         await MainActor.run {
             NotificationCenter.default.post(
                 name: .activityUnreadChanged,
@@ -383,4 +369,3 @@ struct ActivityAllView: View {
         return out.string(from: d)
     }
 }
-

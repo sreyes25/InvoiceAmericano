@@ -17,6 +17,7 @@ struct InvoiceAmericanoApp: App {
     @State private var showOnboarding = false
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
     @State private var onboardingStatusError: String?
+    @State private var didSyncUnreadThisActive = false
 
     private func recomputeOnboardingFlag() async {
         do {
@@ -45,6 +46,24 @@ struct InvoiceAmericanoApp: App {
                 // If we previously completed onboarding, keep the user in the app despite network errors.
                 self.showOnboarding = self.hasCompletedOnboarding ? false : true
             }
+        }
+    }
+
+    private func syncUnreadAndBadgeIfNeeded() async {
+        let shouldSync = await MainActor.run { () -> Bool in
+            if didSyncUnreadThisActive { return false }
+            didSyncUnreadThisActive = true
+            return true
+        }
+        guard shouldSync else { return }
+        let count = await ActivityService.markAllUnreadForCurrentUser()
+        await NotificationService.setAppBadgeCount(count)
+        await MainActor.run {
+            NotificationCenter.default.post(
+                name: .activityUnreadChanged,
+                object: nil,
+                userInfo: ["count": count]
+            )
         }
     }
 
@@ -95,11 +114,15 @@ struct InvoiceAmericanoApp: App {
             // Re-check session when app becomes active (covers token refresh / cold starts)
             .onChange(of: scenePhase) {
                 if scenePhase == .active {
+                    didSyncUnreadThisActive = false
                     isAuthed = (AuthService.currentUserIDFast() != nil)
                     if isAuthed {
                         Task { await recomputeOnboardingFlag() }
                         Task { await RealtimeService.start() }
+                        Task { await syncUnreadAndBadgeIfNeeded() }
                     }
+                } else if scenePhase == .background || scenePhase == .inactive {
+                    didSyncUnreadThisActive = false
                 }
             }
             .task {
@@ -108,6 +131,7 @@ struct InvoiceAmericanoApp: App {
                     await recomputeOnboardingFlag()
                     await NotificationService.syncDeviceTokenIfNeeded()
                     await RealtimeService.start()
+                    await syncUnreadAndBadgeIfNeeded()
                 }
             }
             .overlay(alignment: .top) {
