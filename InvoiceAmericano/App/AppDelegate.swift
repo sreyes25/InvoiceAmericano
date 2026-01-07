@@ -13,7 +13,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
-        Task { await NotificationService.registerIfAuthorized() }
+
+        // Debug: confirm notification authorization state + APNs registration attempt
+        Task {
+            let center = UNUserNotificationCenter.current()
+            let settings = await center.notificationSettings()
+            print("🔔 Notification settings:", settings.authorizationStatus.rawValue,
+                  "alert:", settings.alertSetting.rawValue,
+                  "badge:", settings.badgeSetting.rawValue,
+                  "sound:", settings.soundSetting.rawValue)
+
+            print("📲 Calling NotificationService.registerIfAuthorized()")
+            await NotificationService.registerIfAuthorized()
+            print("📲 Finished NotificationService.registerIfAuthorized()")
+        }
         // Ensure local notifications are authorized (banners/sounds/badges) even while app is foreground
         LocalNotify.requestIfNeeded()
         return true
@@ -23,13 +36,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func application(_ application: UIApplication,
                      didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
+        print("🟢 APNs DEVICE TOKEN:", token)
         NotificationService.cache(deviceToken: token)
         Task { await NotificationService.syncDeviceTokenIfNeeded(force: true) }
     }
 
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("APNs registration failed:", error)
+        print("🔴 APNs REGISTRATION FAILED:", error)
     }
 
     // Show banners/sounds/badges while app is in the foreground

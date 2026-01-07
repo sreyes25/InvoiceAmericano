@@ -9,6 +9,7 @@
 //
 
 import SwiftUI
+import UserNotifications
 
 struct ActivityAllView: View {
     @State private var items: [ActivityJoined] = []
@@ -83,6 +84,12 @@ struct ActivityAllView: View {
         .navigationTitle("Activity")
         // MARK: Mark visible rows as read (server + optimistic), then notify Home
         .task {
+            // 🔴 CLEAR APP ICON BADGE
+            if #available(iOS 17.0, *) {
+                try? await UNUserNotificationCenter.current().setBadgeCount(0)
+            } else {
+                UIApplication.shared.applicationIconBadgeNumber = 0
+            }
             await load()
             
 
@@ -376,3 +383,4 @@ struct ActivityAllView: View {
         return out.string(from: d)
     }
 }
+

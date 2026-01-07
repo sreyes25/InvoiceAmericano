@@ -77,7 +77,9 @@ struct MainTabView: View {
                         unreadCount = 0
                         justClearedBadge = true
                     }
-                    try? await ActivityService.markAllAsRead()
+                    // NOTE: Server-side mark-as-read was removed when `invoice_activity.user_id` was dropped.
+                    // We still clear the badge immediately for UX. Re-introduce a safe server-side mark-as-read
+                    // via an RPC (or SQL function) that scopes by invoice ownership.
                 }
             } else {
                 // If we just cleared it this session, keep it at 0 and skip a recount once.

@@ -611,6 +611,8 @@ struct HomeView: View {
                 // Activity -> slide up recent activity
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    
+                    UNUserNotificationCenter.current().setBadgeCount(0)
 
                     // 1) Optimistically clear the badge immediately (feels instant)
                     unreadCount = 0

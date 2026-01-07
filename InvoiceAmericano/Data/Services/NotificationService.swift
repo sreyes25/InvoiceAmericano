@@ -21,6 +21,8 @@ enum NotificationService {
     private static let lastSyncedUserIDKey = "apnsLastSyncedUserID"
     private static let lastSyncResultKey = "apnsLastSyncResult"
     private static let lastSyncDateKey = "apnsLastSyncDate"
+    private static let syncLock = NSLock()
+    private static var isSyncInFlight = false
 
     // MARK: - Permissions
     static func currentPermissionStatus() async -> UNAuthorizationStatus {
@@ -64,10 +66,25 @@ enum NotificationService {
     static func cachedDeviceToken() -> String? {
         defaults.string(forKey: tokenKey)
     }
+    
 
     static func syncDeviceTokenIfNeeded(force: Bool = false) async {
         guard let token = cachedDeviceToken(), !token.isEmpty else { return }
         guard let uid = SupabaseManager.shared.currentUserIDString() else { return }
+
+        // Prevent concurrent sync attempts from racing (multiple callers can trigger sync at once).
+        syncLock.lock()
+        if isSyncInFlight {
+            syncLock.unlock()
+            return
+        }
+        isSyncInFlight = true
+        syncLock.unlock()
+        defer {
+            syncLock.lock()
+            isSyncInFlight = false
+            syncLock.unlock()
+        }
 
         let lastToken = defaults.string(forKey: lastSyncedTokenKey)
         let lastUserID = defaults.string(forKey: lastSyncedUserIDKey)
@@ -80,17 +97,26 @@ enum NotificationService {
         }
 
         do {
+            print("📲 [NotificationService] Syncing APNs token → Supabase | uid=\(uid) | tokenPrefix=\(token.prefix(10))…")
+
+            // Use UPSERT to avoid duplicate key errors.
+            // Your table already has a unique constraint on (user_id, token).
             _ = try await SupabaseManager.shared.client
                 .from("device_tokens")
-                .upsert(Payload(user_id: uid, token: token, platform: "ios"), onConflict: "token")
+                .upsert(Payload(user_id: uid, token: token, platform: "ios"), onConflict: "user_id,token")
                 .execute()
+
+            print("✅ [NotificationService] Token saved to device_tokens")
 
             defaults.set(token, forKey: lastSyncedTokenKey)
             defaults.set(uid, forKey: lastSyncedUserIDKey)
             defaults.set("success", forKey: lastSyncResultKey)
             defaults.set(Date(), forKey: lastSyncDateKey)
         } catch {
-            defaults.set("error", forKey: lastSyncResultKey)
+            let message = String(describing: error)
+            print("🔴 [NotificationService] Token sync FAILED: \(message)")
+
+            defaults.set("error: \(message)", forKey: lastSyncResultKey)
             defaults.set(Date(), forKey: lastSyncDateKey)
         }
     }
