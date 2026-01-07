@@ -83,6 +83,7 @@ struct HomeView: View {
 
     // Unread activity count (for badge)
     @State private var unreadCount: Int = 0
+    @State private var didMarkActivitySheetRead = false
 
     var body: some View {
         // MainTabView already wraps this in a NavigationStack
@@ -247,10 +248,24 @@ struct HomeView: View {
             await refreshUnread()
         }
         .onChange(of: showActivitySheet) { oldValue, newValue in
-            // When the sheet transitions from open -> closed, recompute unread and broadcast
-            if oldValue == true && newValue == false {
+            if newValue == true && !didMarkActivitySheetRead {
+                didMarkActivitySheetRead = true
+                Task {
+                    let count = await ActivityService.markAllUnreadForCurrentUser()
+                    await NotificationService.setAppBadgeCount(count)
+                    await MainActor.run { unreadCount = count }
+                    NotificationCenter.default.post(
+                        name: .activityUnreadChanged,
+                        object: nil,
+                        userInfo: ["count": count]
+                    )
+                }
+            } else if oldValue == true && newValue == false {
+                didMarkActivitySheetRead = false
                 Task {
                     let n = (try? await ActivityService.countUnread()) ?? 0
+                    await MainActor.run { unreadCount = n }
+                    await NotificationService.setAppBadgeCount(n)
                     await MainActor.run {
                         NotificationCenter.default.post(
                             name: .activityUnreadChanged,
@@ -611,40 +626,7 @@ struct HomeView: View {
                 // Activity -> slide up recent activity
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    
-                    UNUserNotificationCenter.current().setBadgeCount(0)
-
-                    // 1) Optimistically clear the badge immediately (feels instant)
-                    unreadCount = 0
-                    NotificationCenter.default.post(
-                        name: .activityUnreadChanged,
-                        object: nil,
-                        userInfo: ["count": 0]
-                    )
-
-                    // 2) Mark the currently visible preview items as read (best-effort)
-                    let ids = recentActivity
-                        .filter { $0.read_at == nil }
-                        .map { $0.id }
-
-                    if !ids.isEmpty {
-                        Task {
-                            await ActivityService.markActivitiesRead(ids: ids)
-
-                            // 3) Recompute server truth and broadcast (covers other unread not in preview)
-                            let n = (try? await ActivityService.countUnread()) ?? 0
-                            await MainActor.run {
-                                NotificationCenter.default.post(
-                                    name: .activityUnreadChanged,
-                                    object: nil,
-                                    userInfo: ["count": n]
-                                )
-                                showActivitySheet = true
-                            }
-                        }
-                    } else {
-                        showActivitySheet = true
-                    }
+                    showActivitySheet = true
                 } label: {
                     ZStack(alignment: .topTrailing) {
                         QuickActionCard(title: "Activity",
@@ -1420,6 +1402,7 @@ private struct RecentActivitySheet: View {
     // listeners (e.g., HomeView) update their own `unreadCount` from the notification.
     private func recalcAndBroadcastUnread() async {
         let n = (try? await ActivityService.countUnread()) ?? 0
+        await NotificationService.setAppBadgeCount(n)
         await MainActor.run {
             NotificationCenter.default.post(
                 name: .activityUnreadChanged,
@@ -2304,4 +2287,3 @@ private struct ActivitySheet: UIViewControllerRepresentable {
 
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
-

@@ -10,7 +10,6 @@ import SwiftUI
 struct MainTabView: View {
     @State private var selectedTab: Int = 0
     @State private var unreadCount: Int = 0
-    @State private var justClearedBadge: Bool = false
     
     private var badgeText: String? {
         unreadCount == 0 ? nil : String(unreadCount)
@@ -67,30 +66,26 @@ struct MainTabView: View {
             // Load badge count initially
             if let c = try? await ActivityService.countUnread() {
                 await MainActor.run { unreadCount = c }
+                await NotificationService.setAppBadgeCount(c)
             }
         }
         .onChange(of: selectedTab) { _, newValue in
-            if newValue == 3 {
-                // Viewing Activity: clear badge immediately and mark server-side as read
+            if newValue == 0 || newValue == 3 {
                 Task {
-                    await MainActor.run {
-                        unreadCount = 0
-                        justClearedBadge = true
-                    }
-                    // NOTE: Server-side mark-as-read was removed when `invoice_activity.user_id` was dropped.
-                    // We still clear the badge immediately for UX. Re-introduce a safe server-side mark-as-read
-                    // via an RPC (or SQL function) that scopes by invoice ownership.
+                    let count = await ActivityService.markAllUnreadForCurrentUser()
+                    await MainActor.run { unreadCount = count }
+                    await NotificationService.setAppBadgeCount(count)
+                    NotificationCenter.default.post(
+                        name: .activityUnreadChanged,
+                        object: nil,
+                        userInfo: ["count": count]
+                    )
                 }
             } else {
-                // If we just cleared it this session, keep it at 0 and skip a recount once.
-                if justClearedBadge {
-                    justClearedBadge = false
-                    unreadCount = 0
-                } else {
-                    Task {
-                        if let c = try? await ActivityService.countUnread() {
-                            await MainActor.run { unreadCount = c }
-                        }
+                Task {
+                    if let c = try? await ActivityService.countUnread() {
+                        await MainActor.run { unreadCount = c }
+                        await NotificationService.setAppBadgeCount(c)
                     }
                 }
             }
@@ -98,6 +93,7 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .activityUnreadChanged)) { note in
             if let n = note.userInfo?["count"] as? Int {
                 unreadCount = n
+                Task { await NotificationService.setAppBadgeCount(n) }
             }
         }
 

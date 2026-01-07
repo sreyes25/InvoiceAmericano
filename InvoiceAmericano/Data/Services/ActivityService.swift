@@ -98,6 +98,36 @@ enum ActivityService {
             return 0
         }
     }
+
+    private struct ActivityIDRow: Decodable { let id: UUID }
+
+    /// Fetch unread activity IDs for the current user (scoped via invoices.user_id).
+    static func fetchUnreadIDsForCurrentUser() async -> [UUID] {
+        guard let uid = SupabaseManager.shared.currentUserID else { return [] }
+        do {
+            let rows: [ActivityIDRow] = try await SupabaseManager.shared.client
+                .from("invoice_activity")
+                .select("id, invoices!inner(user_id)")
+                .is("read_at", value: nil)
+                .is("deleted_at", value: nil)
+                .eq("invoices.user_id", value: uid.uuidString)
+                .execute()
+                .value
+            return rows.map(\.id)
+        } catch {
+            print("⚠️ fetchUnreadIDsForCurrentUser failed:", error)
+            return []
+        }
+    }
+
+    /// Marks all unread activity rows for the current user as read and returns the updated unread count.
+    static func markAllUnreadForCurrentUser() async -> Int {
+        let ids = await fetchUnreadIDsForCurrentUser()
+        if !ids.isEmpty {
+            await markActivitiesRead(ids: ids)
+        }
+        return (try? await countUnread()) ?? 0
+    }
     
     // Recent joined activity rows for the dashboard preview
     static func fetchRecentActivityJoined(limit: Int = 5) async throws -> [ActivityJoined] {
