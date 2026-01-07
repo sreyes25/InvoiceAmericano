@@ -3,11 +3,6 @@
 //  InvoiceAmericano
 //
 
-//
-//  ActivityAllView.swift
-//  InvoiceAmericano
-//
-
 import SwiftUI
 
 struct ActivityAllView: View {
@@ -16,7 +11,6 @@ struct ActivityAllView: View {
     @State private var loadingMore = false
     @State private var reachedEnd = false
     @State private var error: String?
-    @State private var didMarkRead = false
 
     // Page size for “More” button
     private let pageSize = 20
@@ -82,45 +76,38 @@ struct ActivityAllView: View {
             }
         }
         .navigationTitle("Activity")
-        // MARK: Mark visible rows as read (server + optimistic), then notify Home
+        // MARK: Mark activity + notifications as read, then clear app icon badge
         .task {
-            guard !didMarkRead else { return }
-            didMarkRead = true
-            await load()
+            // Load first so we can optimistically update visible rows
+            await initialLoad()
 
-            let count = await ActivityService.markAllUnreadForCurrentUser()
-            await NotificationService.setAppBadgeCount(count)
+            // 1) Mark unread invoice activity as read on the server
+            _ = await ActivityService.markAllUnreadForCurrentUser()
 
+            // 2) Mark unread notifications as read on the server (this is what APNs badge count uses)
+            await NotificationService.markAllNotificationsReadForCurrentUser()
+
+            // 3) Optimistically update local state for visible rows
             let now = ISO8601DateFormatter().string(from: Date())
             for i in items.indices where items[i].read_at == nil {
                 items[i].read_at = now
             }
 
-            await recalcAndBroadcastUnread()
+            // 4) Clear the app icon badge locally (iOS 17+ safe API inside NotificationService)
+            await NotificationService.setAppBadgeCount(0)
+
+            // 5) Notify Home to refresh any in-app badge UI
+            await MainActor.run {
+                NotificationCenter.default.post(name: .activityUnreadChanged, object: nil)
+            }
         }
         .navigationDestination(for: UUID.self) { invoiceId in
             InvoiceDetailView(invoiceId: invoiceId)
         }
     }
     
-    private func recalcAndBroadcastUnread() async {
-        let n = (try? await ActivityService.countUnread()) ?? 0
-        await NotificationService.setAppBadgeCount(n)
-        await MainActor.run {
-            NotificationCenter.default.post(
-                name: .activityUnreadChanged,
-                object: nil,
-                userInfo: ["count": n]
-            )
-        }
-    }
 
     // MARK: - Loading
-
-    // Thin wrapper so the .task snippet can call `load()`
-    private func load() async {
-        await initialLoad()
-    }
 
     private func initialLoad() async {
         loading = true; error = nil; reachedEnd = false
@@ -179,34 +166,6 @@ struct ActivityAllView: View {
 
     // MARK: - Row title / icon
 
-    private func title(for row: ActivityJoined) -> String {
-        let number = row.invoiceNumber
-        let client = row.clientName
-
-        let label: String = {
-            if !number.isEmpty && number != "—" { return "Invoice \(number)" }
-            return "Invoice " + row.id.uuidString.prefix(8)
-        }()
-
-        let action: String
-        switch row.event {
-        case "created":  action = "created"
-        case "sent":     action = "sent"
-        case "opened":   action = "opened"
-        case "paid":     action = "paid"
-        case "archived": action = "archived"
-        case "deleted":  action = "deleted"
-        case "overdue":  action = "overdue"
-        case "due_soon": action = "due soon"
-        default:         action = row.event
-        }
-
-        if !client.isEmpty && client != "—" {
-            return "\(label) — \(action.capitalized) (\(client))"
-        } else {
-            return "\(label) — \(action.capitalized)"
-        }
-    }
 
     private func icon(for event: String) -> String {
         switch event {
@@ -348,9 +307,6 @@ struct ActivityAllView: View {
         groups.keys.sorted(by: >)
     }
 
-    private func groupedDayKeys(_ items: [ActivityJoined]) -> [String] {
-        groupedDayKeys(from: groupByDay(items))
-    }
 
     private func dayHeader(from key: String) -> String {
         let f = DateFormatter()

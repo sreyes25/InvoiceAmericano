@@ -250,20 +250,16 @@ private struct NotificationsStep: View {
 
     private func request() async {
         await MainActor.run { requesting = true; error = nil }
-        do {
-            let granted = await NotificationService.requestAuthorization()
-            if granted {
-                await NotificationService.syncDeviceTokenIfNeeded(force: true)
-            }
-            await MainActor.run {
-                requesting = false
-                if !granted {
-                    // user declined; continue anyway
-                }
-                onGrantedOrSkip()
-            }
-        } catch {
-            await MainActor.run { requesting = false; self.error = error.localizedDescription; onGrantedOrSkip() }
+
+        let granted = await NotificationService.requestAuthorization()
+        if granted {
+            await NotificationService.syncDeviceTokenIfNeeded(force: true)
+        }
+
+        await MainActor.run {
+            requesting = false
+            // user might decline; continue anyway
+            onGrantedOrSkip()
         }
     }
 }

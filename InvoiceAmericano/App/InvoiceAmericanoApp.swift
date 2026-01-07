@@ -56,8 +56,12 @@ struct InvoiceAmericanoApp: App {
             return true
         }
         guard shouldSync else { return }
-        let count = await ActivityService.markAllUnreadForCurrentUser()
+
+        // IMPORTANT: Do NOT mark anything read here.
+        // Just compute the current unread count and mirror it to the app icon badge.
+        let count = (try? await ActivityService.countUnread()) ?? 0
         await NotificationService.setAppBadgeCount(count)
+
         await MainActor.run {
             NotificationCenter.default.post(
                 name: .activityUnreadChanged,
