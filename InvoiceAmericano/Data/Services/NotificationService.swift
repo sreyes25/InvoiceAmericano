@@ -125,6 +125,19 @@ enum NotificationService {
         (defaults.string(forKey: lastSyncResultKey), defaults.object(forKey: lastSyncDateKey) as? Date)
     }
 
+    @MainActor
+    static func setAppBadgeCount(_ count: Int) async {
+        if #available(iOS 17.0, *) {
+            do {
+                try await UNUserNotificationCenter.current().setBadgeCount(count)
+            } catch {
+                print("⚠️ Failed to set app badge count:", error)
+            }
+        } else {
+            UIApplication.shared.applicationIconBadgeNumber = count
+        }
+    }
+
     static func reset() {
         defaults.removeObject(forKey: lastSyncedTokenKey)
         defaults.removeObject(forKey: lastSyncedUserIDKey)
