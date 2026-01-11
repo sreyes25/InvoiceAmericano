@@ -131,12 +131,38 @@ struct OnboardingFlow: View {
                 .update(ProfileUpdate(display_name: businessName))
                 .eq("id", value: uid)
                 .execute()
+            
+            // 2) Upsert branding_settings (business name + tagline) so PDFs have it immediately
+            struct BrandingPayload: Encodable {
+                let user_id: String
+                let business_name: String
+                let tagline: String?
+                let accent_hex: String?
+                let logo_public_url: String?
+            }
 
-            // 2) Mirror to auth metadata (nice to have)
+            let cleanName = businessName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanTag  = tagline.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            _ = try await client
+                .from("branding_settings")
+                .upsert(
+                    BrandingPayload(
+                        user_id: uid,
+                        business_name: cleanName,
+                        tagline: cleanTag.isEmpty ? nil : cleanTag,
+                        accent_hex: nil,
+                        logo_public_url: nil
+                    ),
+                    onConflict: "user_id"
+                )
+                .execute()
+
+            // 3) Mirror to auth metadata (nice to have)
             let attrs = UserAttributes(data: ["full_name": AnyJSON.string(businessName)])
             _ = try await client.auth.update(user: attrs)
 
-            // 3) Upsert invoice defaults
+            // 4) Upsert invoice defaults
             // Create this table if you don't have it:
             //   create table invoice_defaults (user_id uuid primary key references auth.users(id), terms text, tax_pct numeric, notes text);
             struct DefaultsPayload: Encodable {
@@ -153,7 +179,7 @@ struct OnboardingFlow: View {
 
             // Invalidate cached brand and notify listeners so first PDF uses the fresh name
             BrandingService.invalidateCache()
-            NotificationCenter.default.post(name: .brandingDidChange, object: businessName)
+            NotificationCenter.default.post(name: .brandingDidChange, object: nil)
 
             await MainActor.run {
                 // Mark onboarding as complete locally so we don't show it again offline

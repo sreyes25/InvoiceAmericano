@@ -8,6 +8,6 @@
 import Foundation
 
 enum AppSupport {
-    static let supportEmail = "support@invoiceamericano.app"
+    static let supportEmail = "reyesasergio@resynctechnology.com"
     static let privacyPolicyURL = URL(string: "https://invoiceamericano.app/privacy")!
 }

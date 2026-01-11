@@ -82,7 +82,7 @@ enum BrandingService {
 
         let result = Branding(
             businessName: resolvedName,
-            tagline: row?.tagline,
+            tagline: cleaned(row?.tagline),
             accentHex: row?.accent_hex,
             logoPublicURL: row?.logo_public_url
         )

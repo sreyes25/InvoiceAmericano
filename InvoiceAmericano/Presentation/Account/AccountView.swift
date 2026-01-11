@@ -533,7 +533,7 @@ struct AccountView: View {
     private var settingsList: some View {
         VStack(spacing: 12) {
             notificationToggleCard
-            notificationsDebugCard
+            //notificationsDebugCard // Debug Notifications 
             supportCard
             privacyCard
         }
