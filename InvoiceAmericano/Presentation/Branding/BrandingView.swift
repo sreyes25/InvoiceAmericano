@@ -197,7 +197,10 @@ struct BrandingView: View {
                     }
                 }
                 self.tagline = branding?.tagline ?? ""
-                if let hex = branding?.accent_hex, let c = Color(hex: hex) { self.accentColor = c }
+                if let hex = branding?.accent_hex?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   let c = Color(hex: hex) {
+                    self.accentColor = c
+                }
                 if let urlStr = branding?.logo_public_url, let u = URL(string: urlStr) { self.existingLogoURL = u }
             }
         } catch {
@@ -206,8 +209,13 @@ struct BrandingView: View {
     }
 
     private func save() async {
-        isSaving = true
-        defer { isSaving = false }
+        await MainActor.run {
+            isSaving = true
+            errorText = nil
+        }
+        defer {
+            Task { await MainActor.run { isSaving = false } }
+        }
         var step = "start"
 
         do {
@@ -263,6 +271,16 @@ struct BrandingView: View {
 
             // 4) Announce & dismiss
             await MainActor.run {
+                // Keep local UI in sync for the next time we open this screen
+                if let logoPublicURL, let u = URL(string: logoPublicURL) {
+                    existingLogoURL = u
+                }
+                pickedUIImage = nil
+                pickedImageData = nil
+
+                // ✅ Critical: clear cached branding so PDFs/UI pick up the new accent/logo/tagline immediately
+                BrandingService.invalidateCache()
+
                 NotificationCenter.default.post(name: .brandingDidChange, object: nil)
                 onBrandNameChanged?(businessName)
                 dismiss()

@@ -22,7 +22,15 @@ enum BrandingService {
 
     static func invalidateCache() { cached = nil }
 
+    /// Update the in-memory cache with a fully resolved Branding object.
+    /// Useful after saving branding settings so callers immediately see changes.
+    static func setCachedBranding(_ branding: Branding) {
+        cached = branding
+    }
+
     static var cachedBusinessName: String? { cached?.businessName }
+
+    static var cachedAccentHex: String? { cached?.accentHex }
 
     static func setCachedBusinessName(_ s: String) {
         if let c = cached {
@@ -83,8 +91,8 @@ enum BrandingService {
         let result = Branding(
             businessName: resolvedName,
             tagline: cleaned(row?.tagline),
-            accentHex: row?.accent_hex,
-            logoPublicURL: row?.logo_public_url
+            accentHex: cleaned(row?.accent_hex),
+            logoPublicURL: cleaned(row?.logo_public_url)
         )
         cached = result
         return result

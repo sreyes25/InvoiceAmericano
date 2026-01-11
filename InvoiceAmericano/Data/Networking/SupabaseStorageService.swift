@@ -19,7 +19,7 @@ enum SupabaseStorageService {
         let uid = try SupabaseManager.shared.requireCurrentUserIDString(lowercased: true)
 
         // Consistent lowercase path to match RLS policy
-        let path = "users/\(uid)/branding/logo.png"
+        let path = "user/\(uid)/logo.png"
 
         // Upload file, allowing overwrite (upsert)
         try await client.storage
