@@ -23,6 +23,8 @@ struct InvoiceListView: View {
     @State private var sharePayload: SharePayload? = nil
     @State private var pushInvoiceId: UUID? = nil
     @State private var search: String = ""
+    @FocusState private var searchFocused: Bool
+    @Namespace private var statusNS
 
     // MARK: - Sections
 
@@ -38,83 +40,217 @@ struct InvoiceListView: View {
 
     @ViewBuilder
     private var statusPickerSection: some View {
-        Section {
-            Picker("Status", selection: $status) {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
                 ForEach(InvoiceStatus.allCases, id: \.self) { s in
-                    Text(s == .all ? "All" : s.rawValue.capitalized).tag(s)
+                    statusChip(s)
                 }
             }
-            .pickerStyle(.segmented)
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func statusChip(_ s: InvoiceStatus) -> some View {
+        let isSelected = (s == status)
+        let title = (s == .all ? "All" : s.rawValue.capitalized)
+        let tint = statusTint(s)
+
+        return Button {
+            guard status != s else { return }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.snappy(duration: 0.22)) {
+                status = s
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(tint.opacity(isSelected ? 0.85 : 0.35))
+                    .frame(width: 8, height: 8)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background {
+                ZStack {
+                    // Selected pill highlight (animated)
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 999, style: .continuous)
+                            .fill(tint.opacity(0.14))
+                            .matchedGeometryEffect(id: "status", in: statusNS)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 999, style: .continuous)
+                                    .fill(
+                                        LinearGradient(colors: [
+                                            tint.opacity(0.18),
+                                            tint.opacity(0.08)
+                                        ], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                    )
+                            )
+                    } else {
+                        RoundedRectangle(cornerRadius: 999, style: .continuous)
+                            .fill(tint.opacity(0.06)) // lower opacity when not selected
+                    }
+                }
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 999, style: .continuous)
+                    .strokeBorder(
+                        isSelected ? tint.opacity(0.35) : Color.black.opacity(0.06),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: tint.opacity(isSelected ? 0.12 : 0.0), radius: 10, y: 6)
+            .contentShape(RoundedRectangle(cornerRadius: 999, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func statusTint(_ s: InvoiceStatus) -> Color {
+        switch s {
+        case .all: return .gray
+        //case .open: return .blue
+        case .sent: return .orange
+        case .overdue: return .red
+        case .paid: return .green
         }
     }
 
     @ViewBuilder
     private var invoicesSection: some View {
-        Section("Invoices") {
-            if isLoading && invoices.isEmpty {
-                ProgressView("Loading…")
-            } else if let error {
-                Text(error).foregroundStyle(.red)
-            } else if filteredInvoices.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "doc.text.magnifyingglass").font(.title2)
-                    Text(search.isEmpty ? "No invoices" : "No results for \"\(search)\"")
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Invoices")
+                    .font(.headline)
+                Spacer()
+                if !invoices.isEmpty {
+                    Text("\(filteredInvoices.count) shown")
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.vertical, 16)
+            }
+
+            if isLoading && invoices.isEmpty {
+                loadingCard
+            } else if let error, invoices.isEmpty {
+                errorCard(error)
+            } else if filteredInvoices.isEmpty {
+                emptyStateCard
             } else {
-                ForEach(filteredInvoices) { inv in
-                    Button {
-                        pushInvoiceId = inv.id
-                    } label: {
-                        InvoiceRowCell(inv: inv)
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                VStack(spacing: 10) {
+                    ForEach(filteredInvoices) { inv in
                         Button {
-                            isSendingId = inv.id
-                            Task { await send(inv) }
+                            pushInvoiceId = inv.id
                         } label: {
-                            Label("Send", systemImage: "paperplane")
+                            InvoiceRowCell(inv: inv)
                         }
-                        .tint(.blue)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button {
+                                isSendingId = inv.id
+                                Task { await send(inv) }
+                            } label: {
+                                if isSendingId == inv.id {
+                                    Label("Sending…", systemImage: "paperplane")
+                                } else {
+                                    Label("Send", systemImage: "paperplane")
+                                }
+                            }
+                            .tint(.blue)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
                 }
             }
         }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(.black.opacity(0.05))
+        )
+    }
+
+    private var loadingCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ProgressView("Loading…")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Fetching your latest invoices")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func errorCard(_ message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Retry") {
+                Task { await load() }
+            }
+            .font(.footnote.weight(.semibold))
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var emptyStateCard: some View {
+        VStack(spacing: 10) {
+            Image(systemName: search.isEmpty ? "doc.text" : "doc.text.magnifyingglass")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+
+            Text(search.isEmpty ? "No invoices yet" : "No results for \"\(search)\"")
+                .font(.subheadline.weight(.semibold))
+
+            Text(search.isEmpty ? "Create your first invoice to get paid faster." : "Try a different search or switch status.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            if search.isEmpty {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    showNew = true
+                } label: {
+                    Text("Create Invoice")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.top, 4)
+            }
+        }
+        .padding(.vertical, 8)
     }
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Search invoices or clients", text: $search)
-                            .textInputAutocapitalization(.words)
-                    }
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color(.secondarySystemBackground))
-                    )
+            ScrollView {
+                VStack(spacing: 14) {
+                    searchBar
+                    invoicesSection
                 }
-                .listRowBackground(Color.clear)
-                statusPickerSection
-                invoicesSection
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
+            }
+            .background {
+                AnimatedInvoicesBackground(status: status)
             }
             .navigationTitle("Invoices")
             .toolbar { addButton }
             .navigationDestination(item: $pushInvoiceId) { invoiceId in
                 InvoiceDetailView(invoiceId: invoiceId)
             }
-            .buttonStyle(.plain)
             .sheet(isPresented: $showNew, content: {
                 newInvoiceSheet
             })
@@ -126,12 +262,73 @@ struct InvoiceListView: View {
                 Task { await load() }
             }
             .refreshable { await load() }
-            .listStyle(.plain)
-            .environment(\.defaultMinListRowHeight, 0)
-            .scrollContentBackground(.hidden)
-            .background(Color(.systemGroupedBackground))
             .scrollIndicators(.hidden)
-            .animation(.easeInOut, value: search)
+        }
+    }
+
+    private var searchBar: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill((status == .all ? Color.gray : Color.blue).opacity(searchFocused ? 0.18 : 0.10))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                TextField("Search by invoice # or client", text: $search)
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.search)
+                    .focused($searchFocused)
+
+                if !search.isEmpty {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            search = ""
+                        }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.scale.combined(with: .opacity))
+                }
+
+                if searchFocused {
+                    Button("Cancel") {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            searchFocused = false
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(searchFocused ? Color.blue.opacity(0.35) : Color.black.opacity(0.05), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(searchFocused ? 0.10 : 0.06), radius: 10, y: 5)
+            .animation(.snappy(duration: 0.22), value: searchFocused)
+            .animation(.easeInOut(duration: 0.15), value: search)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(InvoiceStatus.allCases, id: \.self) { s in
+                        statusChip(s)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
         }
     }
 
@@ -140,7 +337,13 @@ struct InvoiceListView: View {
     @ToolbarContentBuilder
     private var addButton: some ToolbarContent {
         ToolbarItem(placement: .navigationBarTrailing) {
-            Button { showNew = true } label: { Image(systemName: "plus") }
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                showNew = true
+            } label: {
+                Label("New", systemImage: "plus")
+                    .font(.subheadline.weight(.semibold))
+            }
         }
     }
 
@@ -225,11 +428,22 @@ struct InvoiceListView: View {
         }
     }
 
+    private func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if let url = error as? URLError, url.code == .cancelled { return true }
+        // Some PostgREST/Supabase errors wrap cancellation; fall back to string match.
+        let msg = (error as NSError).localizedDescription.lowercased()
+        if msg.contains("cancelled") || msg.contains("canceled") { return true }
+        return false
+    }
+
     private func load() async {
         await MainActor.run {
             isLoading = true
+            // Do NOT clear existing invoices or force an error card during pull-to-refresh.
             error = nil
         }
+
         do {
             let rows = try await InvoiceService.fetchInvoices(status: status)
             await MainActor.run {
@@ -237,6 +451,12 @@ struct InvoiceListView: View {
                 isLoading = false
             }
         } catch {
+            // ✅ Pull-to-refresh can cancel the task; that's not a real error.
+            if isCancellation(error) {
+                await MainActor.run { isLoading = false }
+                return
+            }
+
             await MainActor.run {
                 self.error = error.friendlyMessage
                 self.isLoading = false
@@ -343,8 +563,9 @@ private struct InvoiceRowCell: View {
                 StatusChip(status: displayStatus(inv))
             }
             Image(systemName: "chevron.right")
-                .font(.footnote.weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
+                .padding(.leading, 2)
         }
         .padding(14)
         .background(
@@ -417,3 +638,61 @@ private struct ActivitySheet: UIViewControllerRepresentable {
     }
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
+
+// MARK: - Animated background (subtle)
+
+private struct AnimatedInvoicesBackground: View {
+    let status: InvoiceStatus
+    @State private var drift = false
+
+    private func tint(for status: InvoiceStatus) -> Color {
+        switch status {
+        case .all: return .gray
+        case .sent: return .orange
+        case .overdue: return .red
+        case .paid: return .green
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Color(.systemGroupedBackground)
+
+            Circle()
+                .fill(tint(for: status).opacity(0.07))
+                .frame(width: 560, height: 560)
+                .blur(radius: 58)
+                .offset(x: drift ? 140 : -120, y: drift ? -80 : -140)
+
+            Circle()
+                .fill(tint(for: status).opacity(0.11))
+                .frame(width: 540, height: 540)
+                .blur(radius: 58)
+                .offset(x: drift ? -120 : 130, y: drift ? 220 : 160)
+
+            Circle()
+                .fill(tint(for: status).opacity(0.13))
+                .frame(width: 600, height: 600)
+                .blur(radius: 52)
+                .offset(x: drift ? -40 : 60, y: drift ? -260 : -220)
+        }
+        .ignoresSafeArea()
+        .onAppear {
+            withAnimation(.easeInOut(duration: 10).repeatForever(autoreverses: true)) {
+                drift.toggle()
+            }
+        }
+    }
+}
+
+
+//#Preview("Invoices – Light") {
+//    InvoiceListView()
+//        .preferredColorScheme(.light)
+//}
+//
+//#Preview("Invoices – Dark") {
+//    InvoiceListView()
+//        .preferredColorScheme(.dark)
+//}
+
