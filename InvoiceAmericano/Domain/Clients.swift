@@ -17,6 +17,7 @@ struct ClientRow: Decodable, Identifiable, Hashable {
     let state: String?
     let zip: String?
     let created_at: Date?
+    let color_hex: String?
 }
 
 // For views that expect `Client`, map it to our existing ClientRow model.

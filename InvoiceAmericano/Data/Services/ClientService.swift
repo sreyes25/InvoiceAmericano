@@ -62,7 +62,7 @@ enum ClientService {
         let uid = try SupabaseManager.shared.requireCurrentUserIDString()
         let rows: [ClientRow] = try await client
             .from("clients")
-            .select("id, name, email, phone, address, city, state, zip, created_at")
+            .select("id, name, email, phone, address, city, state, zip, created_at, color_hex")
             .eq("user_id", value: uid)
             .order("created_at", ascending: false)
             .execute()
@@ -106,7 +106,7 @@ enum ClientService {
         let uid = try SupabaseManager.shared.requireCurrentUserIDString()
         let row: ClientRow = try await client
             .from("clients")
-            .select("id, name, email, phone, address, city, state, zip, created_at")
+            .select("id, name, email, phone, address, city, state, zip, created_at, color_hex")
             .eq("id", value: id.uuidString)
             .eq("user_id", value: uid)
             .single()

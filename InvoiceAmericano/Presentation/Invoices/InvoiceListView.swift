@@ -522,8 +522,16 @@ private struct InvoiceRowCell: View {
         HStack(spacing: 12) {
             // Avatar / initials bubble
             ZStack {
+                let base = clientColor(inv).opacity(0.32)
+                let hi = clientColor(inv).opacity(0.18)
                 Circle()
-                    .fill(LinearGradient(colors: [Color.red.opacity(0.30), Color.orange.opacity(0.28)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .fill(
+                        LinearGradient(
+                            colors: [base, hi],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
                     .overlay(
                         Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: 0.5)
                     )
@@ -578,6 +586,15 @@ private struct InvoiceRowCell: View {
         )
         .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func clientColor(_ inv: InvoiceRow) -> Color {
+        // Prefer the per-client color coming from DB (clients.color_hex).
+        if let hex = inv.client?.colorHex, let c = Color(hex: hex) {
+            return c
+        }
+        // Fallback keeps the previous gray-ish look.
+        return .gray
     }
 
     private func displayStatus(_ inv: InvoiceRow) -> String {
@@ -696,3 +713,32 @@ private struct AnimatedInvoicesBackground: View {
 //        .preferredColorScheme(.dark)
 //}
 
+
+
+
+private extension Color {
+    /// Parses "#RRGGBB" or "RRGGBB" (and optionally "#AARRGGBB"). Returns nil if invalid.
+    init?(hex: String) {
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6 || s.count == 8 else { return nil }
+
+        var value: UInt64 = 0
+        guard Scanner(string: s).scanHexInt64(&value) else { return nil }
+
+        let a, r, g, b: Double
+        if s.count == 8 {
+            a = Double((value & 0xFF00_0000) >> 24) / 255.0
+            r = Double((value & 0x00FF_0000) >> 16) / 255.0
+            g = Double((value & 0x0000_FF00) >> 8) / 255.0
+            b = Double(value & 0x0000_00FF) / 255.0
+        } else {
+            a = 1.0
+            r = Double((value & 0xFF00_00) >> 16) / 255.0
+            g = Double((value & 0x00FF_00) >> 8) / 255.0
+            b = Double(value & 0x0000_FF) / 255.0
+        }
+
+        self = Color(.sRGB, red: r, green: g, blue: b, opacity: a)
+    }
+}

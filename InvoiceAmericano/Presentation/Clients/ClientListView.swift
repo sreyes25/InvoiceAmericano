@@ -182,9 +182,9 @@ struct ClientListView: View {
         // If the model changes, previews will safely fall back to an empty list.
         let json = """
         [
-          {"id":"3B4A4A3E-9C5F-4B9D-9C4E-7A7E0A0A0001","name":"Acme Construction","email":"billing@acme.com","city":"Brooklyn","state":"NY"},
-          {"id":"3B4A4A3E-9C5F-4B9D-9C4E-7A7E0A0A0002","name":"Maria Lopez","email":"maria@example.com","city":"Queens","state":"NY"},
-          {"id":"3B4A4A3E-9C5F-4B9D-9C4E-7A7E0A0A0003","name":"Park Slope Dermatology","email":"frontdesk@parkslopedermatology.com","city":"Brooklyn","state":"NY"}
+          {"id":"3B4A4A3E-9C5F-4B9D-9C4E-7A7E0A0A0001","name":"Acme Construction","email":"billing@acme.com","city":"Brooklyn","state":"NY","color_hex":"#60A5FA"},
+          {"id":"3B4A4A3E-9C5F-4B9D-9C4E-7A7E0A0A0002","name":"Maria Lopez","email":"maria@example.com","city":"Queens","state":"NY","color_hex":"#34D399"},
+          {"id":"3B4A4A3E-9C5F-4B9D-9C4E-7A7E0A0A0003","name":"Park Slope Dermatology","email":"frontdesk@parkslopedermatology.com","city":"Brooklyn","state":"NY","color_hex":"#A78BFA"}
         ]
         """
 
@@ -276,31 +276,48 @@ struct ClientListView: View {
 private struct ClientRowCard: View {
     let client: ClientRow
 
+    private func avatarColor() -> Color {
+        // Uses DB-provided color if available; falls back to a neutral placeholder.
+        let hex = (client.color_hex ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !hex.isEmpty else { return Color.gray.opacity(0.85) }
+
+        var s = hex
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let rgb = UInt64(s, radix: 16) else {
+            return Color.gray.opacity(0.85)
+        }
+
+        let r = Double((rgb >> 16) & 0xFF) / 255.0
+        let g = Double((rgb >> 8) & 0xFF) / 255.0
+        let b = Double(rgb & 0xFF) / 255.0
+        return Color(red: r, green: g, blue: b)
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             // Avatar / initials bubble
             ZStack {
                 Circle()
-                    .fill(Color.blue.opacity(0.85))
+                    .fill(avatarColor().opacity(0.85))
                     .overlay(
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(0.25),
-                                        Color.black.opacity(0.15)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
+                        Circle().fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.25),
+                                    Color.black.opacity(0.15)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
                             )
+                        )
                     )
                     .overlay(
                         Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: 0.5)
                     )
+
                 Text(initials(from: client.name))
                     .font(.subheadline.bold())
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
             }
             .frame(width: 40, height: 40)
 

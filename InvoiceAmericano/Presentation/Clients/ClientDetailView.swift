@@ -139,7 +139,7 @@ private struct ClientHeaderCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 12) {
-                InitialsAvatar(name: client.name)
+                InitialsAvatar(name: client.name, colorHex: client.color_hex)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(client.name)
                         .font(.title3.bold())
@@ -182,17 +182,31 @@ private struct ClientHeaderCard: View {
 
 private struct InitialsAvatar: View {
     let name: String
+    let colorHex: String?
 
     var body: some View {
         let initials = initialsFromName(name)
+        let base = Color(hex: colorHex) ?? Color(.systemGray4)
+
         ZStack {
             Circle()
-                .fill(LinearGradient(colors: [.indigo.opacity(0.9), .blue], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .fill(
+                    LinearGradient(
+                        colors: [base.opacity(0.85), base.opacity(0.55)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
                 .frame(width: 44, height: 44)
+                .overlay(
+                    Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 0.6)
+                )
+
             Text(initials)
                 .font(.headline.weight(.bold))
                 .foregroundStyle(.white)
         }
+        .shadow(color: base.opacity(0.18), radius: 10, y: 6)
         .accessibilityLabel(Text("Client avatar: \(initials)"))
     }
 
@@ -200,7 +214,7 @@ private struct InitialsAvatar: View {
         let parts = s.split(separator: " ")
         let first = parts.first?.prefix(1) ?? "?"
         let last = parts.dropFirst().first?.prefix(1) ?? ""
-        return String(first + last)
+        return String(first + last).uppercased()
     }
 }
 
@@ -325,5 +339,20 @@ private struct StatusChip: View {
         case "open": return .blue
         default: return .gray
         }
+    }
+}
+
+
+private extension Color {
+    init?(hex: String?) {
+        guard var raw = hex?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        if raw.hasPrefix("#") { raw.removeFirst() }
+        guard raw.count == 6, let value = Int(raw, radix: 16) else { return nil }
+
+        let r = Double((value >> 16) & 0xFF) / 255.0
+        let g = Double((value >> 8) & 0xFF) / 255.0
+        let b = Double(value & 0xFF) / 255.0
+
+        self = Color(red: r, green: g, blue: b)
     }
 }

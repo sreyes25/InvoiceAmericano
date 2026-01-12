@@ -12,7 +12,29 @@ import SwiftUI
 import Foundation
 import UIKit
 import Combine
+
 import PDFKit
+
+// MARK: - Hex Color Helper
+private extension Color {
+    /// Supports: "#RRGGBB" or "RRGGBB" (case-insensitive)
+    init?(hex: String?) {
+        guard var hex = hex?.trimmingCharacters(in: .whitespacesAndNewlines), !hex.isEmpty else { return nil }
+        if hex.hasPrefix("#") { hex.removeFirst() }
+        guard hex.count == 6, let value = Int(hex, radix: 16) else { return nil }
+
+        let r = Double((value >> 16) & 0xFF) / 255.0
+        let g = Double((value >> 8) & 0xFF) / 255.0
+        let b = Double(value & 0xFF) / 255.0
+        self = Color(red: r, green: g, blue: b)
+    }
+}
+
+private enum ClientAvatar {
+    static func fillColor(hex: String?) -> Color {
+        Color(hex: hex) ?? Color.gray.opacity(0.55)
+    }
+}
 
 // Global UI spacers for consistent structure
 private enum UI {
@@ -875,19 +897,25 @@ private struct SelectedClientCard: View {
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
-                Circle().fill(LinearGradient(colors: [Color.blue.opacity(0.22), Color.indigo.opacity(0.18)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                Circle()
+                    .fill(ClientAvatar.fillColor(hex: client.color_hex))
+
                 Text(initials(from: client.name))
                     .font(.subheadline.bold())
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.white)
             }
             .frame(width: 40, height: 40)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(client.name).font(.headline)
+                Text(client.name)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
                 HStack(spacing: 6) {
                     if let email = client.email, !email.isEmpty {
                         Image(systemName: "envelope").foregroundStyle(.secondary).font(.caption)
-                        Text(email).font(.caption).foregroundStyle(.secondary)
+                        Text(email)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 if (client.city?.isEmpty == false) || (client.state?.isEmpty == false) {
@@ -933,10 +961,10 @@ private struct PlaceholderClientCard: View {
         HStack(spacing: 12) {
             // Avatar / initials bubble (CL for Client)
             ZStack {
-                Circle().fill(LinearGradient(colors: [Color.blue.opacity(0.22), Color.indigo.opacity(0.18)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                Circle().fill(Color.gray.opacity(0.35))
                 Text("CL")
                     .font(.subheadline.bold())
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.white)
             }
             .frame(width: 40, height: 40)
 
@@ -1202,23 +1230,22 @@ private struct ClientPickerSheet: View {
                                     // Initials bubble
                                     ZStack {
                                         Circle()
-                                            .fill(
-                                                LinearGradient(
-                                                    colors: [Color.blue.opacity(0.22), Color.indigo.opacity(0.18)],
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                )
-                                            )
+                                            .fill(ClientAvatar.fillColor(hex: c.color_hex))
+
                                         Text(initials(from: c.name))
                                             .font(.subheadline.bold())
-                                            .foregroundStyle(.blue)
+                                            .foregroundStyle(.white)
                                     }
                                     .frame(width: 36, height: 36)
 
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(c.name).font(.headline)
+                                        Text(c.name)
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
                                         if let email = c.email, !email.isEmpty {
-                                            Text(email).font(.caption).foregroundStyle(.secondary)
+                                            Text(email)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
                                         }
                                         if (c.city?.isEmpty == false) || (c.state?.isEmpty == false) {
                                             Text("\(c.city ?? "")\(c.city != nil && c.state != nil ? ", " : "")\(c.state ?? "")")
@@ -1230,6 +1257,7 @@ private struct ClientPickerSheet: View {
                                 }
                                 .padding(.vertical, 8)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 } header: {

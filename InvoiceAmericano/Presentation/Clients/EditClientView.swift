@@ -85,15 +85,27 @@ struct EditClientView: View {
         !isSaving && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && hasChanges
     }
 
+    private var clientTint: Color {
+        Color(hex: client.color_hex) ?? .gray
+    }
+
+    private var clientInitials: String {
+        initials(from: client.name)
+    }
+
+    private func initials(from name: String) -> String {
+        let parts = name.split(separator: " ").filter { !$0.isEmpty }
+        let first = parts.first?.first.map(String.init) ?? "?"
+        let second = parts.dropFirst().first?.first.map(String.init) ?? ""
+        return (first + second).uppercased()
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 14) {
+                    HeaderCard(tint: clientTint, initials: clientInitials, title: "Edit Client", subtitle: client.name)
 
-                    // Title card
-                    HeaderCard(icon: "person.crop.circle", title: "Edit Client", subtitle: client.name)
-
-                    // Client card
                     SectionCard(title: "Client") {
                         LabeledField("Full Name") {
                             TextField("Required", text: $name)
@@ -122,7 +134,6 @@ struct EditClientView: View {
                         }
                     }
 
-                    // Address card
                     SectionCard(title: "Address") {
                         LabeledField("Street") {
                             TextField("Street address", text: $address)
@@ -142,8 +153,7 @@ struct EditClientView: View {
                             LabeledField("State") {
                                 TextField("CA", text: $state)
                                     .textInputAutocapitalization(.characters)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(maxWidth: 70)
+                                    .frame(maxWidth: 72)
                                     .submitLabel(.next)
                                     .focused($focused, equals: .state)
                                     .onSubmit { focused = .zip }
@@ -152,7 +162,7 @@ struct EditClientView: View {
                                 TextField("90210", text: $zip)
                                     .keyboardType(.numbersAndPunctuation)
                                     .textContentType(.postalCode)
-                                    .frame(maxWidth: 100)
+                                    .frame(maxWidth: 104)
                                     .submitLabel(.done)
                                     .focused($focused, equals: .zip)
                                     .onSubmit { focused = nil }
@@ -163,26 +173,15 @@ struct EditClientView: View {
                     if let error {
                         InlineError(text: error)
                     }
-
-                    // Actions
-                    VStack(spacing: 12) {
-                        Button {
-                            Task { await save() }
-                        } label: {
-                            PrimaryButtonLabel(text: isSaving ? "Saving…" : "Save Changes", icon: "checkmark.circle.fill")
-                        }
-                        .disabled(!canSave)
-
-                        Button(role: .cancel) { dismiss() } label: {
-                            SecondaryButtonLabel(text: "Cancel", icon: "xmark.circle")
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
                 }
+                .padding(.horizontal, 16)
                 .padding(.top, 12)
-                .padding(.horizontal)
+                .padding(.bottom, 24)
             }
+            .background {
+                AnimatedClientEditBackground(tint: clientTint)
+            }
+            .navigationTitle("Edit")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -194,7 +193,6 @@ struct EditClientView: View {
                     }
                     .disabled(!canSave)
                 }
-                // Keyboard accessory
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("Done") { focused = nil }
@@ -249,7 +247,8 @@ struct EditClientView: View {
                 city: trimmedCity.isEmpty ? nil : trimmedCity,
                 state: trimmedState.isEmpty ? nil : trimmedState,
                 zip: trimmedZip.isEmpty ? nil : trimmedZip,
-                created_at: client.created_at
+                created_at: client.created_at,
+                color_hex: client.color_hex
             )
 
             await MainActor.run {
@@ -269,19 +268,38 @@ struct EditClientView: View {
 // MARK: - Reusable UI bits
 
 private struct HeaderCard: View {
-    let icon: String
+    let tint: Color
+    let initials: String
     let title: String
     let subtitle: String
 
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
-                Circle().fill(.blue.opacity(0.12))
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.blue)
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [tint.opacity(0.95), tint.opacity(0.65)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: 0.6)
+                    )
+
+                if initials.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || initials == "?" {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                } else {
+                    Text(initials)
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.white)
+                }
             }
-            .frame(width: 40, height: 40)
+            .frame(width: 44, height: 44)
+            .shadow(color: tint.opacity(0.18), radius: 10, y: 6)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.headline)
@@ -346,37 +364,40 @@ private struct LabeledField<Content: View>: View {
     }
 }
 
-private struct PrimaryButtonLabel: View {
-    let text: String
-    let icon: String
-    var body: some View {
-        HStack {
-            Spacer()
-            Image(systemName: icon)
-            Text(text).bold()
-            Spacer()
-        }
-        .padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.accentColor))
-        .foregroundStyle(.white)
-    }
-}
+// MARK: - Subtle animated background
 
-private struct SecondaryButtonLabel: View {
-    let text: String
-    let icon: String
+private struct AnimatedClientEditBackground: View {
+    let tint: Color
+    @State private var drift = false
+
     var body: some View {
-        HStack {
-            Spacer()
-            Image(systemName: icon)
-            Text(text).bold()
-            Spacer()
+        ZStack {
+            Color(.systemGroupedBackground)
+
+            Circle()
+                .fill(Color.gray.opacity(0.08))
+                .frame(width: 560, height: 560)
+                .blur(radius: 58)
+                .offset(x: drift ? 140 : -120, y: drift ? -80 : -140)
+
+            Circle()
+                .fill(Color.gray.opacity(0.10))
+                .frame(width: 540, height: 540)
+                .blur(radius: 58)
+                .offset(x: drift ? -120 : 130, y: drift ? 220 : 160)
+
+            Circle()
+                .fill(tint.opacity(0.12))
+                .frame(width: 600, height: 600)
+                .blur(radius: 52)
+                .offset(x: drift ? -40 : 60, y: drift ? -260 : -220)
         }
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.tertiarySystemBackground))
-        )
+        .ignoresSafeArea()
+        .onAppear {
+            withAnimation(.easeInOut(duration: 10).repeatForever(autoreverses: true)) {
+                drift.toggle()
+            }
+        }
     }
 }
 
@@ -397,5 +418,37 @@ private struct InlineError: View {
             RoundedRectangle(cornerRadius: 12).strokeBorder(.red.opacity(0.2))
         )
         .padding(.horizontal)
+    }
+}
+
+// MARK: - Hex color helper
+
+private extension Color {
+    /// Supports: "#RRGGBB" or "RRGGBB" (optionally "#AARRGGBB"). Returns nil if invalid.
+    init?(hex: String?) {
+        guard var hex = hex?.trimmingCharacters(in: .whitespacesAndNewlines), !hex.isEmpty else {
+            return nil
+        }
+        if hex.hasPrefix("#") { hex.removeFirst() }
+
+        // Allow AARRGGBB or RRGGBB
+        let value = UInt64(hex, radix: 16)
+        guard let value else { return nil }
+
+        switch hex.count {
+        case 6:
+            let r = Double((value & 0xFF0000) >> 16) / 255.0
+            let g = Double((value & 0x00FF00) >> 8) / 255.0
+            let b = Double(value & 0x0000FF) / 255.0
+            self = Color(.sRGB, red: r, green: g, blue: b, opacity: 1.0)
+        case 8:
+            let a = Double((value & 0xFF000000) >> 24) / 255.0
+            let r = Double((value & 0x00FF0000) >> 16) / 255.0
+            let g = Double((value & 0x0000FF00) >> 8) / 255.0
+            let b = Double(value & 0x000000FF) / 255.0
+            self = Color(.sRGB, red: r, green: g, blue: b, opacity: a)
+        default:
+            return nil
+        }
     }
 }

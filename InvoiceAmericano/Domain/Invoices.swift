@@ -29,6 +29,12 @@ struct InvoiceRow: Identifiable, Decodable {
 
 struct ClientRef: Decodable {
     let name: String?
+    let colorHex: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case colorHex = "color_hex"
+    }
 }
 
 enum InvoiceStatus: String, CaseIterable {

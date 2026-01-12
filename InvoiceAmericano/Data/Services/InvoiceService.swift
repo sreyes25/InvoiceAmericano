@@ -174,7 +174,7 @@ enum InvoiceService {
 
         let query = client
             .from("invoices")
-            .select("id, number, status, total, created_at, due_date, client_id, client:clients!invoices_client_id_fkey(name)")
+            .select("id, number, status, total, created_at, due_date, client_id, client:clients!invoices_client_id_fkey(name, color_hex)")
             .eq("user_id", value: uid)
             .order("created_at", ascending: false)
 
@@ -371,7 +371,7 @@ enum InvoiceService {
             .from("invoices")
             .select("""
                 id, number, status, subtotal, tax, total, notes, currency, created_at, issued_at, due_date, checkout_url,
-                client:clients!invoices_client_id_fkey(name),
+                client:clients!invoices_client_id_fkey(name, color_hex),
                 line_items(id, title, description, qty, unit_price, amount)
             """)
             .eq("id", value: id.uuidString)
