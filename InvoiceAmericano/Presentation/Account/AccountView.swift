@@ -71,6 +71,7 @@ struct AccountView: View {
 
     // MARK: - Body
     var body: some View {
+        AppBackground {
         ScrollView {
             VStack(spacing: 20) {
                 header
@@ -88,6 +89,7 @@ struct AccountView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
+        }
         }
         .navigationTitle("Account")
         .navigationBarTitleDisplayMode(.large)

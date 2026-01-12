@@ -16,63 +16,68 @@ struct ActivityAllView: View {
     private let pageSize = 20
 
     var body: some View {
-        Group {
-            if loading && items.isEmpty {
-                ProgressView("Loading…")
-            } else if let e = error {
-                VStack(spacing: 8) {
-                    Text("Error").font(.headline)
-                    Text(e).foregroundStyle(.red)
-                    Button("Retry") { Task { await initialLoad() } }
-                }
-                .padding(.top, 24)
-            } else if items.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "bell.badge").font(.largeTitle)
-                    Text("No activity yet").foregroundStyle(.secondary)
-                }
-                .padding(.top, 24)
-            } else {
-                List {
-                    // Precompute groups & keys to keep expressions simple for the compiler
-                    let groups = groupByDay(items)
-                    let keys = groupedDayKeys(from: groups)
+        AppBackground {
+            Group {
+                if loading && items.isEmpty {
+                    ProgressView("Loading…")
+                } else if let e = error {
+                    VStack(spacing: 8) {
+                        Text("Error").font(.headline)
+                        Text(e).foregroundStyle(.red)
+                        Button("Retry") { Task { await initialLoad() } }
+                    }
+                    .padding(.top, 24)
+                } else if items.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "bell.badge").font(.largeTitle)
+                        Text("No activity yet").foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 24)
+                } else {
+                    List {
+                        // Precompute groups & keys to keep expressions simple for the compiler
+                        let groups = groupByDay(items)
+                        let keys = groupedDayKeys(from: groups)
 
-                    // Grouped-by-day sections
-                    ForEach(keys, id: \.self) { dayKey in
-                        Section(header: Text(dayHeader(from: dayKey))) {
-                            let sectionItems = groups[dayKey] ?? []
-                            ForEach(sectionItems) { row in
-                                if let id = row.invoice_id {
-                                    NavigationLink(value: id) {
+                        // Grouped-by-day sections
+                        ForEach(keys, id: \.self) { dayKey in
+                            Section(header: Text(dayHeader(from: dayKey))) {
+                                let sectionItems = groups[dayKey] ?? []
+                                ForEach(sectionItems) { row in
+                                    if let id = row.invoice_id {
+                                        NavigationLink(value: id) {
+                                            activityRowCell(row)
+                                        }
+                                    } else {
                                         activityRowCell(row)
                                     }
-                                } else {
-                                    activityRowCell(row)
+                                }
+                                .onDelete { offsets in
+                                    deleteRowsInSection(dayKey: dayKey, offsets: offsets)
                                 }
                             }
-                            .onDelete { offsets in
-                                deleteRowsInSection(dayKey: dayKey, offsets: offsets)
-                            }
                         }
-                    }
 
-                    // Footer: Load more / spinner
-                    if !reachedEnd {
-                        Section {
-                            HStack {
-                                Spacer()
-                                if loadingMore {
-                                    ProgressView()
-                                } else {
-                                    Button("More") { Task { await loadMore() } }
+                        // Footer: Load more / spinner
+                        if !reachedEnd {
+                            Section {
+                                HStack {
+                                    Spacer()
+                                    if loadingMore {
+                                        ProgressView()
+                                    } else {
+                                        Button("More") { Task { await loadMore() } }
+                                    }
+                                    Spacer()
                                 }
-                                Spacer()
                             }
                         }
                     }
+                    .listStyle(.insetGrouped)
+                    // ✅ Key fix: don’t let List draw its own opaque background
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
                 }
-                .listStyle(.insetGrouped)
             }
         }
         .navigationTitle("Activity")
@@ -219,7 +224,7 @@ struct ActivityAllView: View {
             // Unread indicator dot
             if row.isUnread {
                 Circle()
-                    .fill(Color.blue)
+                    .fill(Color.primary.opacity(0.65))
                     .frame(width: 8, height: 8)
                     .accessibilityLabel("Unread")
             }

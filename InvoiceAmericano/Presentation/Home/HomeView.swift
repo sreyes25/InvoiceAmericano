@@ -85,26 +85,28 @@ struct HomeView: View {
     @State private var unreadCount: Int = 0
 
     var body: some View {
-        // MainTabView already wraps this in a NavigationStack
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-
-                // --- Summary cards ---
-                summaryCards
-
-                // --- Quick actions (now adaptive grid) ---
-                quickActions
-
-                // --- Payments (Stripe Connect) ---
-                paymentsSection
-
-                if let errorText {
-                    Text(errorText).foregroundStyle(.red)
-                        .padding(.horizontal)
+        AppBackground {
+            // MainTabView already wraps this in a NavigationStack
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    
+                    // --- Summary cards ---
+                    summaryCards
+                    
+                    // --- Quick actions (now adaptive grid) ---
+                    quickActions
+                    
+                    // --- Payments (Stripe Connect) ---
+                    paymentsSection
+                    
+                    if let errorText {
+                        Text(errorText).foregroundStyle(.red)
+                            .padding(.horizontal)
+                    }
+                    Spacer(minLength: 16)
                 }
-                Spacer(minLength: 16)
+                .padding(.top, 12)
             }
-            .padding(.top, 12)
         }
         .navigationTitle("Home")
         .navigationBarTitleDisplayMode(.inline)
@@ -258,7 +260,7 @@ struct HomeView: View {
         .navigationTitle("Home")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbarBackgroundVisibility(.visible, for: .navigationBar)
+//        .toolbarBackgroundVisibility(.visible, for: .navigationBar)
     } // <-- close body
 
     // MARK: - Payments section (Stripe Connect)
