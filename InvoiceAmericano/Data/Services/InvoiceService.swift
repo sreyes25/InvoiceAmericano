@@ -72,10 +72,11 @@ private struct CreateCheckoutRequest: Encodable {
 }
 
 private struct CreateCheckoutResponse: Decodable {
-    let checkout_url: String?
+    let ok: Bool?
+    let url: String?
+    let reason: String?
 }
 
-private struct _CheckoutURLRow: Decodable { let checkout_url: String? }
 private struct _SentUpdate: Encodable { let status: String; let sent_at: String }
 
 // MARK: - Service
@@ -307,7 +308,7 @@ enum InvoiceService {
                     body: CreateCheckoutRequest(invoice_id: invoiceId.uuidString, user_id: uid)
                 )
             )
-            if let s = response.checkout_url, let u = URL(string: s) {
+            if let s = response.url, let u = URL(string: s) {
                 checkoutURL = u
             }
         } catch {
@@ -322,32 +323,24 @@ enum InvoiceService {
         let client = SupabaseManager.shared.client
         let uid = try requireUID()
 
-        // 1) Trigger checkout session (ignore response body)
-        _ = try? await client.functions.invoke(
-            "create_checkout",
-            options: FunctionInvokeOptions(
-                headers: ["Content-Type": "application/json"],
-                body: CreateCheckoutRequest(invoice_id: id.uuidString, user_id: uid)
-            )
-        )
-
-        // 2) Try to read back the checkout_url if your function writes it
-        var checkoutURL: URL? = nil
+        // 1) Ask edge function to create checkout IF possible (it will return url=nil if not connected)
         do {
-            let row: _CheckoutURLRow = try await client
-                .from("invoices")
-                .select("checkout_url")
-                .match(["id": id.uuidString])
-                .eq("user_id", value: uid)
-                .single()
-                .execute()
-                .value
-            if let s = row.checkout_url, let u = URL(string: s) { checkoutURL = u }
+            let response: CreateCheckoutResponse = try await client.functions.invoke(
+                "create_checkout",
+                options: FunctionInvokeOptions(
+                    headers: ["Content-Type": "application/json"],
+                    body: CreateCheckoutRequest(invoice_id: id.uuidString, user_id: uid)
+                )
+            )
+            if let s = response.url, let u = URL(string: s) {
+                return u
+            }
+            // Not connected → url nil → allow sending without link
+            return nil
         } catch {
-            // It's okay if it's not there yet
+            // If function fails, we still allow sending without link (launch-safe behavior)
+            return nil
         }
-
-        return checkoutURL
     }
 
     // Explicitly mark an invoice as sent after a successful user share action.

@@ -88,6 +88,9 @@ struct InvoiceDetailView: View {
     @State private var sharePayload: SharePayload? = nil
 
     @State private var previewItem: PDFPreviewItem? = nil
+    // Processing fee disclaimer
+    @AppStorage("hide_processing_fee_disclaimer") private var hideProcessingFeeDisclaimer: Bool = false
+    @State private var showProcessingFeeDisclaimer: Bool = false
 
     var body: some View {
         Group {
@@ -183,7 +186,7 @@ struct InvoiceDetailView: View {
                         BottomActionBar(
                             total: d.total ?? 0,
                             onOpen: { Task { await openPDFPreview() } },
-                            onSend: { Task { await send() } }
+                            onSend: { sendTapped() }
                         )
                     }
                 }
@@ -232,6 +235,25 @@ struct InvoiceDetailView: View {
         }
         .sheet(item: $previewItem) { item in
             PDFPreviewSheet(url: item.url, invoiceId: invoiceId)
+        }
+        .sheet(isPresented: $showProcessingFeeDisclaimer) {
+            ProcessingFeeDisclaimerSheet(
+                invoiceNumber: detail?.number,
+                onCancel: {
+                    showProcessingFeeDisclaimer = false
+                },
+                onContinue: {
+                    showProcessingFeeDisclaimer = false
+                    Task { await send() }
+                },
+                onDontShowAgain: {
+                    hideProcessingFeeDisclaimer = true
+                    showProcessingFeeDisclaimer = false
+                    Task { await send() }
+                }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -315,6 +337,25 @@ struct InvoiceDetailView: View {
         .cardStyle()
     }
 
+    private func sendTapped() {
+        // Always allow sending.
+        // Only show the disclaimer when Stripe is connected (because only then we attach a payment link),
+        // and only if the user hasn't opted out.
+        Task {
+            if hideProcessingFeeDisclaimer {
+                await send()
+                return
+            }
+
+            let status = await IA_fetchStripeStatus()
+            if status?.connected == true {
+                await MainActor.run { showProcessingFeeDisclaimer = true }
+            } else {
+                await send()
+            }
+        }
+    }
+
     // MARK: - Actions
 
     private func load() async {
@@ -340,17 +381,14 @@ struct InvoiceDetailView: View {
 
     private func send() async {
         do {
-            // 1) Create/refresh checkout link (require it to exist to proceed)
-            guard let payURL = try await InvoiceService.sendInvoice(id: invoiceId) else {
-                await MainActor.run { self.error = "Could not create payment link." }
-                return
-            }
+            // 1) Attempt to create/refresh checkout link (optional)
+            let payURL = try await InvoiceService.sendInvoice(id: invoiceId)
 
             // 2) Fresh PDF
             guard let d = detail else { return }
             let pdfURL = try await PDFGenerator.makeInvoicePDF(detail: d)
 
-            // 3) Verify the PDF really exists and has size > 0 (prevents blank sheet)
+            // 3) Verify PDF exists and has size > 0
             let path = pdfURL.path
             var fileOK = FileManager.default.fileExists(atPath: path)
             if fileOK {
@@ -364,13 +402,38 @@ struct InvoiceDetailView: View {
                 return
             }
 
-            // 4) Phase A: clear any previous payload, then wait a tick
-            await MainActor.run { self.sharePayload = nil }
-            try? await Task.sleep(nanoseconds: 350_000_000) // ~0.35s warms extensions
+            // 4) Prepare share text (professional default message)
+            let clientName = d.client?.name ?? "there"
+            let message: String
+            if payURL != nil {
+                message = """
+            Hi \(clientName),
 
-            // 5) Phase B: set payload which triggers the sheet
+            Please find your invoice #\(d.number) attached.
+
+            A secure payment link is attached to this message.
+
+            Thank you.
+            """
+                        } else {
+                            message = """
+            Hi \(clientName),
+
+            Please find your invoice #\(d.number) attached.
+
+            Let me know if you have any questions.
+
+            Thank you.
+            """
+            }
+
+            // 5) Two-phase share payload
+            await MainActor.run { self.sharePayload = nil }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+
             await MainActor.run {
-                let items: [Any] = ["Invoice \(d.number)", pdfURL, payURL]
+                var items: [Any] = [message, pdfURL]
+                if let payURL { items.append(payURL) }
                 self.sharePayload = SharePayload(items: items)
             }
 
@@ -481,6 +544,89 @@ struct InvoiceDetailView: View {
     private func displayStatus(dStatus: String, sentAt: String?) -> String {
         // If you later include sent_at: if dStatus == "open" && sentAt != nil → "sent"
         return dStatus
+    }
+}
+
+// MARK: - Processing Fee Disclaimer (Apple glass style)
+private struct ProcessingFeeDisclaimerSheet: View {
+    let invoiceNumber: String?
+    let onCancel: () -> Void
+    let onContinue: () -> Void
+    let onDontShowAgain: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Capsule()
+                .fill(Color.primary.opacity(0.12))
+                .frame(width: 44, height: 5)
+                .padding(.top, 10)
+
+            VStack(spacing: 10) {
+                Image(systemName: "info.circle.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                Text("Processing fee notice")
+                    .font(.title3.weight(.semibold))
+
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 6)
+
+            VStack(spacing: 10) {
+                Button {
+                    onContinue()
+                } label: {
+                    Text("Continue")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                Button {
+                    onDontShowAgain()
+                } label: {
+                    Text("Don’t show again")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+
+                Button(role: .cancel) {
+                    onCancel()
+                } label: {
+                    Text("Cancel")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 18)
+        }
+        .frame(maxWidth: .infinity)
+        .background(
+            ZStack {
+                // Apple-glass look
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.10))
+            }
+            .ignoresSafeArea()
+        )
+    }
+
+    private var message: String {
+        let num = invoiceNumber ?? ""
+        if num.isEmpty {
+            return "When you include a payment link, your client will pay the invoice total plus a $1 processing fee."
+        }
+        return "When you include a payment link, your client will pay invoice #\(num) plus a $1 processing fee."
     }
 }
 
