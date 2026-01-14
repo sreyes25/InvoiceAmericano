@@ -696,7 +696,6 @@ private struct LineItemCard: View {
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 140)
                                 .focused($focusedField, equals: .price)
-                                .toolbar { keyboardToolbar }
                                 .onChange(of: unitPriceText) { _, newVal in
                                     unitPrice = parsePrice(newVal)
                                 }
@@ -709,7 +708,6 @@ private struct LineItemCard: View {
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 180, alignment: .trailing)
                                 .focused($focusedField, equals: .price)
-                                .toolbar { keyboardToolbar }
                                 .onChange(of: unitPriceText) { _, newVal in
                                     unitPrice = parsePrice(newVal)
                                 }
@@ -750,19 +748,7 @@ private struct LineItemCard: View {
         }
     }
 
-    // Small “calculator-ish” keyboard toolbar
-    @ToolbarContentBuilder
-    private var keyboardToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .keyboard) {
-            Button("−10") { unitPrice = max(0, unitPrice - 10) }
-            Button("−1")  { unitPrice = max(0, unitPrice - 1)  }
-            Spacer()
-            Button("+1")  { unitPrice += 1 }
-            Button("+10") { unitPrice += 10 }
-            Button("Done") { focusedField = nil }
-                .font(.headline)
-        }
-    }
+    // Keyboard toolbar removed
 }
 
 // Compact summary row: shows just index badge, title/description (wrapped), and trailing total.
@@ -779,6 +765,8 @@ private struct LineItemSummaryCard: View {
     private var isShortDescription: Bool {
         let trimmed = item.description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
+        if trimmed.contains("\n") { return false }
+        if trimmed.hasPrefix("- ") || trimmed.hasPrefix("• ") || trimmed.hasPrefix("*") { return false }
         let words = trimmed.split(whereSeparator: { $0.isWhitespace })
         return words.count <= 3 && trimmed.count <= 24
     }
@@ -801,6 +789,41 @@ private struct LineItemSummaryCard: View {
         return !(promotedTitle != nil && d == promotedTitle)
     }
 
+    // --- List parsing helpers for bullet lists in description ---
+    private var listLines: [String]? {
+        let trimmed = item.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        // Parse into bullet items if the description looks like a list.
+        let items = parseListItems(from: trimmed)
+        // Treat as list only if it’s clearly multiple items.
+        return items.count >= 2 ? items : nil
+    }
+
+    private func parseListItems(from text: String) -> [String] {
+        let lines = text
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0) }
+
+        let cleaned: [String] = lines.compactMap { line in
+            let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty else { return nil }
+
+            if t.hasPrefix("- ") { return String(t.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines) }
+            if t.hasPrefix("• ") { return String(t.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines) }
+            if t.hasPrefix("*") {
+                let trimmed = t.drop(while: { $0 == "*" || $0 == " " })
+                let s = String(trimmed).trimmingCharacters(in: .whitespacesAndNewlines)
+                return s.isEmpty ? nil : s
+            }
+
+            // If plain multi-line text (no markers), still allow it to become bullets.
+            return t
+        }
+
+        return cleaned
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             Text("\(index)")
@@ -817,11 +840,31 @@ private struct LineItemSummaryCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if shouldShowBodyDescription {
-                    Text(item.description)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .lineLimit(3)
+                    if let bullets = listLines {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(bullets.prefix(3)).indices, id: \.self) { idx in
+                                let b = bullets[idx]
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text("•")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 10, alignment: .leading)
+
+                                    Text(b)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+                    } else {
+                        Text(item.description)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(3)
+                    }
                 }
             }
             .contentShape(Rectangle())
@@ -1341,43 +1384,12 @@ private struct ItemPickerSheet: View {
                     .listRowBackground(Color(.systemBackground))
 
                     if viewModel.quantity > 1 {
-                        // Read-only total when using quantity
                         HStack {
                             Text("Line total")
                             Spacer()
                             Text(lineTotal, format: .currency(code: "USD"))
-                            .font(.headline)
+                                .font(.headline)
                         }
-                    } else {
-                        // Editable price when there is no quantity
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Price")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.secondary)
-
-                            HStack(spacing: 12) {
-                                Spacer()
-                                TextField("0.00", text: $unitPriceText)
-                                    .keyboardType(.decimalPad)
-                                    .multilineTextAlignment(.trailing)
-                                    .frame(width: 180, alignment: .trailing)
-                                    .onChange(of: unitPriceText) { _, newVal in
-                                        viewModel.unitPrice = parsePrice(newVal)
-                                    }
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color(.systemBackground))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .strokeBorder(Color.black.opacity(colorScheme == .light ? 0.12 : 0.35))
-                            )
-                        }
-                        .padding(.top, 0)
-                        .padding(.bottom, 2)
                     }
                 } header: {
                     Text("New item")
@@ -1401,6 +1413,7 @@ private struct ItemPickerSheet: View {
                     }
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Item")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -1497,6 +1510,7 @@ private struct FloatingMultilineField: View {
                     .frame(minHeight: minHeight)
                     .padding(10)
                     .scrollContentBackground(.hidden)
+                    .scrollDismissesKeyboard(.interactively)
                     .textSelection(.enabled)
 
                 if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1521,12 +1535,30 @@ private struct ItemPreviewCard: View {
     @Binding var quantity: Int
     @Binding var unitPrice: Double
 
+    // MARK: - Styling (light/dark safe)
+    private var fieldFill: Color { Color(.systemBackground) }
+
+    private var strokeColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.14) : Color.black.opacity(0.10)
+    }
+
+    private var subtleFill: Color {
+        colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.05)
+    }
+
+    private var accentFill: Color {
+        colorScheme == .dark ? Color.accentColor.opacity(0.28) : Color.accentColor.opacity(0.16)
+    }
+
     @FocusState private var focusedField: Field?
     enum Field { case title, desc, price }
 
     @State private var isTitleOpen = false
     @State private var isDescOpen  = false
     @State private var unitPriceText: String = ""
+    @State private var isListOpen  = false
+    @State private var listItems: [String] = []
+    @State private var newListItemText: String = ""
 
     private func isBlank(_ s: String) -> Bool {
         s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1547,6 +1579,62 @@ private struct ItemPreviewCard: View {
         return Double(cleaned) ?? 0
     }
 
+    private func parseListItems(from description: String) -> [String] {
+        let lines = description
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0) }
+        let cleaned = lines.compactMap { line -> String? in
+            let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty { return nil }
+            if t.hasPrefix("- ") { return String(t.dropFirst(2)) }
+            if t.hasPrefix("• ") { return String(t.dropFirst(2)) }
+            if t.hasPrefix("*") {
+                let trimmed = t.drop(while: { $0 == "*" || $0 == " " })
+                return trimmed.isEmpty ? nil : String(trimmed)
+            }
+            // If the user typed plain lines, treat them as list items.
+            return t
+        }
+        return cleaned.isEmpty ? [""] : cleaned
+    }
+
+    private func formattedListDescription(from items: [String]) -> String {
+        let cleaned = items
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !cleaned.isEmpty else { return "" }
+        return cleaned.map { "- \($0)" }.joined(separator: "\n")
+    }
+
+    private func syncListItemsFromDescription() {
+        listItems = parseListItems(from: description)
+
+        // If it's basically empty, start with no visible items.
+        if listItems.count == 1,
+           listItems.first?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+            listItems = []
+        }
+    }
+
+    private func syncDescriptionFromListItems() {
+        // Behind the scenes, store list items into `description` as "- item" lines.
+        // The UI never shows this raw formatting.
+        description = formattedListDescription(from: listItems)
+    }
+
+    private func addListItem() {
+        let t = newListItemText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+
+        withAnimation(.easeInOut(duration: 0.15)) {
+            listItems.append(t)
+            newListItemText = ""
+        }
+
+        // Keep backend description updated without exposing formatting to the user.
+        syncDescriptionFromListItems()
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             // TITLE — collapsible button → field
@@ -1560,6 +1648,7 @@ private struct ItemPreviewCard: View {
                     HStack {
                         Image(systemName: "text.cursor")
                             .font(.headline)
+                            .foregroundStyle(Color.accentColor)
                         Text(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add title" : String(title.prefix(60)))
                             .font(.headline)
                             .lineLimit(1)
@@ -1567,7 +1656,14 @@ private struct ItemPreviewCard: View {
                     }
                     .padding(.horizontal, 14).padding(.vertical, 12)
                     .frame(maxWidth: .infinity)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(.tint.opacity(0.12)))
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(subtleFill)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(strokeColor)
+                            )
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -1588,10 +1684,10 @@ private struct ItemPreviewCard: View {
                     HStack {
                         Image(systemName: "square.and.pencil")
                             .font(.headline)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Color.accentColor)
                         Text(description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add description" : String(description.prefix(60)))
                             .font(.headline)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
                         Spacer()
                     }
@@ -1599,93 +1695,291 @@ private struct ItemPreviewCard: View {
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity)
                     .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.accentColor.opacity(0.8))
-                            .animation(.easeInOut(duration: 0.25), value: UUID())
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(accentFill)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(strokeColor)
+                            )
                     )
                 }
                 .buttonStyle(.plain)
             }
 
-            // PRICE — only show when quantity > 1 (per-unit editor lives inside the card)
-            if quantity > 1 {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Unit price")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 12) {
+            // LIST — optional bullet list builder (stores into `description` behind the scenes)
+            if isListOpen {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("List")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
                         Spacer()
-                        TextField("0.00", text: $unitPriceText)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 180, alignment: .trailing)
-                            .focused($focusedField, equals: .price)
-                            .toolbar { keyboardToolbar }
-                            .onChange(of: unitPriceText) { _, newVal in
-                                unitPrice = parsePrice(newVal)
-                            }
+                        Button("Done") {
+                            // Persist list → description on close (behind the scenes)
+                            syncDescriptionFromListItems()
+                            withAnimation(.easeInOut(duration: 0.18)) { isListOpen = false }
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .buttonStyle(.plain)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.secondary.opacity(0.2))
+
+                    VStack(spacing: 10) {
+                        // Existing items (styled)
+                        ForEach(listItems.indices, id: \.self) { idx in
+                            HStack(spacing: 12) {
+                                // Accent badge
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [
+                                                    Color.accentColor.opacity(colorScheme == .dark ? 0.28 : 0.18),
+                                                    Color.accentColor.opacity(colorScheme == .dark ? 0.14 : 0.10)
+                                                ],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+
+                                    Image(systemName: "checkmark")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(Color.accentColor)
+                                }
+                                .frame(width: 32, height: 32)
+
+                                Text(listItems[idx])
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                Spacer()
+
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                        listItems.remove(at: idx)
+                                    }
+                                    syncDescriptionFromListItems()
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.subheadline.weight(.bold))
+                                        .foregroundStyle(.secondary)
+                                        .padding(8)
+                                        .background(
+                                            Circle()
+                                                .fill(Color.black.opacity(colorScheme == .dark ? 0.28 : 0.06))
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(Text("Remove list item"))
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 12)
                             .background(
-                                RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground))
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(Color(.secondarySystemBackground))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [
+                                                        Color.accentColor.opacity(colorScheme == .dark ? 0.10 : 0.06),
+                                                        Color.clear
+                                                    ],
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                )
+                                            )
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .strokeBorder(strokeColor)
+                                    )
+                            )
+                            .shadow(
+                                color: Color.black.opacity(colorScheme == .dark ? 0.22 : 0.06),
+                                radius: colorScheme == .dark ? 10 : 6,
+                                y: colorScheme == .dark ? 6 : 3
+                            )
+                        }
+
+                        // One input field (type here) + quick add button
+                        HStack(spacing: 12) {
+                            TextField("List item", text: $newListItemText)
+                                .textInputAutocapitalization(.sentences)
+                                .textSelection(.enabled)
+                                .submitLabel(.done)
+                                .onSubmit { addListItem() }
+
+                            Button { addListItem() } label: {
+                                ZStack {
+                                    Circle().fill(
+                                        LinearGradient(
+                                            colors: [Color.green.opacity(0.70), Color.indigo.opacity(0.18)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    Image(systemName: "plus")
+                                        .font(.headline)
+                                        .foregroundStyle(.white)
+                                }
+                                .frame(width: 34, height: 34)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(Text("Add list item"))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(fieldFill)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .strokeBorder(strokeColor)
+                                )
+                        )
+
+                    }
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .onAppear {
+                    // Initialize from current description so the list reflects existing content.
+                    syncListItemsFromDescription()
+                }
+            } else {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isListOpen = true
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "list.bullet")
+                            .font(.headline)
+                            .foregroundStyle(Color.accentColor)
+                        Text("Add list")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(subtleFill)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(strokeColor)
                             )
                     )
                 }
+                .buttonStyle(.plain)
             }
 
-            // QUANTITY — single pill button or unified stepper
-            if quantity <= 1 {
+            // PRICE — always inside the card so it visually belongs to the item
+            VStack(alignment: .leading, spacing: 8) {
+                Text(quantity > 1 ? "Unit price" : "Price")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 12) {
+                    Spacer()
+                    TextField("0.00", text: $unitPriceText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 180, alignment: .trailing)
+                        .focused($focusedField, equals: .price)
+                        .onChange(of: unitPriceText) { _, newVal in
+                            unitPrice = parsePrice(newVal)
+                        }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(fieldFill)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(strokeColor)
+                        )
+                )
+            }
+            .onChange(of: unitPrice) { _, newVal in
+                // Keep the text field in sync when unitPrice changes via keyboard toolbar buttons
+                if focusedField != .price {
+                    unitPriceText = formattedString(from: newVal)
+                }
+            }
+
+            // QUANTITY — keep footprint stable (no swapping views that change row height)
+            ZStack {
+                // Add Quantity button (shown when quantity == 1)
                 Button {
-                    quantity = 2
+                    withAnimation(.snappy(duration: 0.22)) { quantity = 2 }
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "plus")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                        Text("Add Quantity")
-                            .font(.headline)
-                            .foregroundStyle(.white)
+                        Image(systemName: "plus").font(.headline).foregroundStyle(Color.accentColor)
+                        Text("Add Quantity").font(.headline).foregroundStyle(.primary)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity)
                     .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.accentColor.opacity(0.8))
-                            .animation(.easeInOut(duration: 0.25), value: UUID())
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(accentFill)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(strokeColor)
+                            )
                     )
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Add quantity")
-            } else {
+                .opacity(quantity <= 1 ? 1 : 0)
+                .allowsHitTesting(quantity <= 1)
+
+                // Quantity pill (shown when quantity > 1)
                 HStack(spacing: 8) {
                     Button {
-                        quantity = max(1, quantity - 1)
+                        withAnimation(.snappy(duration: 0.18)) {
+                            quantity = max(1, quantity - 1)
+                        }
                     } label: {
-                        Image(systemName: "minus")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .frame(width: 28, height: 28)
+                        HStack {
+                            Spacer(minLength: 0)
+                            Image(systemName: "minus")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Spacer(minLength: 0)
+                        }
+                        .frame(width: 64, height: 44)          // BIG tap target
+                        .contentShape(Rectangle())              // makes the whole area tappable
                     }
                     .buttonStyle(.plain)
 
                     Text("\(quantity)")
                         .font(.headline.monospacedDigit())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                         .frame(minWidth: 32)
+                        .contentTransition(.numericText()) // smooth number change
 
                     Button {
-                        quantity = min(999, quantity + 1)
+                        withAnimation(.snappy(duration: 0.10)) {
+                            quantity = min(999, quantity + 1)
+                        }
                     } label: {
-                        Image(systemName: "plus")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .frame(width: 28, height: 28)
+                        HStack {
+                            Spacer(minLength: 0)
+                            Image(systemName: "plus")
+                                .font(.headline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Spacer(minLength: 0)
+                        }
+                        .frame(width: 64, height: 44)          // BIG tap target
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -1693,40 +1987,38 @@ private struct ItemPreviewCard: View {
                 .padding(.vertical, 8)
                 .background(
                     Capsule()
-                        .fill(.tint)
-                        .animation(.easeInOut(duration: 0.25), value: UUID())
+                        .fill(subtleFill)
+                        .overlay(
+                            Capsule().strokeBorder(strokeColor)
+                        )
                 )
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Quantity \(quantity)")
+                .opacity(quantity > 1 ? 1 : 0)
+                .allowsHitTesting(quantity > 1)
             }
+            .frame(height: 52) // <- forces stable row height, kills the jitter
+            .animation(.snappy(duration: 0.22), value: quantity)
         }
         .padding(.vertical, 4)
+        .padding(.vertical, 8)
         .highPriorityGesture(
             DragGesture(minimumDistance: 16).onEnded { _ in
                 if isBlank(title) { withAnimation(.easeInOut(duration: 0.2)) { isTitleOpen = false } }
                 if isBlank(description) { withAnimation(.easeInOut(duration: 0.2)) { isDescOpen  = false } }
+                if isListOpen, formattedListDescription(from: listItems).isEmpty {
+                    withAnimation(.easeInOut(duration: 0.2)) { isListOpen = false }
+                }
             }
         )
         .onAppear {
             if unitPriceText.isEmpty {
                 unitPriceText = formattedString(from: unitPrice)
             }
+            // Keep list editor consistent with whatever description currently contains.
+            syncListItemsFromDescription()
         }
     }
 
-    // Small “calculator-ish” keyboard toolbar
-    @ToolbarContentBuilder
-    private var keyboardToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .keyboard) {
-            Button("−10") { unitPrice = max(0, unitPrice - 10) }
-            Button("−1")  { unitPrice = max(0, unitPrice - 1)  }
-            Spacer()
-            Button("+1")  { unitPrice += 1 }
-            Button("+10") { unitPrice += 10 }
-            Button("Done") { focusedField = nil }
-                .font(.headline)
-        }
-    }
+    // Keyboard toolbar removed
 }
 
 // Card-styled Add button for the Items section
@@ -2299,5 +2591,38 @@ struct PDFKitView: UIViewRepresentable {
 
     func updateUIView(_ uiView: PDFView, context: Context) {
         uiView.document = PDFDocument(data: data)
+    }
+}
+
+#Preview("Item Picker – Dark") {
+    let vm = ItemDraftViewModel()
+
+    return ItemPickerSheet(
+        viewModel: vm,
+        currentItemIndex: 1,
+        presets: ["Service call", "Labor hour", "Materials", "Cleanup"],
+        onAdd: { _ in },
+        onClose: { }
+    )
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Item Picker – Light") {
+    let vm = ItemDraftViewModel()
+
+    return ItemPickerSheet(
+        viewModel: vm,
+        currentItemIndex: 1,
+        presets: ["Service call", "Labor hour", "Materials", "Cleanup"],
+        onAdd: { _ in },
+        onClose: { }
+    )
+    .preferredColorScheme(.light)
+}
+
+
+private extension UIApplication {
+    func endEditing() {
+        sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
