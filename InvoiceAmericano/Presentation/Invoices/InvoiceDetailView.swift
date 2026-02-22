@@ -77,8 +77,35 @@ private struct SharePayload: Identifiable {
     let items: [Any]
 }
 
+
 struct InvoiceDetailView: View {
     let invoiceId: UUID
+    
+    // Persist PDF-saved indicator per invoice (local fallback).
+    // If you later add a DB column (recommended), replace this with `detail.pdf_saved_at != nil`.
+    private var pdfSavedKey: String { "invoice_pdf_saved_\(invoiceId.uuidString)" }
+    private var didPersistPDFSaved: Bool { UserDefaults.standard.bool(forKey: pdfSavedKey) }
+    private func persistPDFSavedLocally() {
+        UserDefaults.standard.set(true, forKey: pdfSavedKey)
+    }
+
+    // Persist PDF-saved indicator both locally (immediate UI) and remotely (so list view shows it).
+    private func persistPDFSaved() async {
+        // local
+        persistPDFSavedLocally()
+        // remote (best-effort)
+        try? await InvoiceService.markPDFSaved(id: invoiceId)
+    }
+    
+    @State private var didCreatePaymentLinkThisSession: Bool = false
+
+    // PDF download (from the PDF preview sheet download button) + “mark as sent” prompt
+    @State private var didDownloadPDF: Bool = false
+    // Controls whether the “Mark as sent?” footer has been dismissed for this invoice session.
+    @State private var dismissedMarkSentPrompt: Bool = false
+    @State private var markSentConfirm: Bool = false
+    
+    @State private var stripeConnected: Bool = false
 
     @State private var detail: InvoiceDetail?
     @State private var isLoading = false
@@ -88,6 +115,38 @@ struct InvoiceDetailView: View {
     @State private var sharePayload: SharePayload? = nil
 
     @State private var previewItem: PDFPreviewItem? = nil
+    // Secondary indicators (session-only for now)
+    @State private var didExportPDF = false
+    @State private var didCreatePayLink = false
+
+    // Returns true if this invoice has a payment link (from DB or created this session)
+    private var hasCheckoutURL: Bool {
+        let dbHas = !((detail?.checkout_url ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        return dbHas || didCreatePaymentLinkThisSession || didCreatePayLink
+    }
+
+    // Manual workflow means we cannot reliably track payment in-app.
+    // - Stripe NOT connected: always manual
+    // - Stripe connected BUT user exported the PDF (they may send without link)
+    private var isManualPaymentWorkflow: Bool {
+        // If Stripe isn't connected → always manual.
+        // If Stripe is connected → manual only if user exported/downloaded PDF and may send without link.
+        // (This allows “Mark Paid” as a fallback after marking Sent.)
+        (!stripeConnected) || (stripeConnected && (didDownloadPDF || didExportPDF))
+    }
+
+    // For the “Mark as sent?” banner:
+    // Show whenever the PDF indicator would be present (user has exported/downloaded/saved the PDF at least once).
+    private var shouldShowMarkSentPrompt: Bool {
+        guard let d = detail else { return false }
+        guard d.status.lowercased() == "open" else { return false }
+        guard !dismissedMarkSentPrompt else { return false }
+
+        // Show this banner whenever the PDF indicator would be present.
+        // (i.e., the user has exported/downloaded the PDF at least once)
+        let pdfSaved = (didPersistPDFSaved || didDownloadPDF || didExportPDF)
+        return pdfSaved
+    }
     // Processing fee disclaimer
     @AppStorage("hide_processing_fee_disclaimer") private var hideProcessingFeeDisclaimer: Bool = false
     @State private var showProcessingFeeDisclaimer: Bool = false
@@ -163,6 +222,35 @@ struct InvoiceDetailView: View {
                             }
                             TotalRow(label: "Total", value: currency(d.total ?? 0, d.currency), bold: true)
                         }
+                       
+                        // Manual Paid flow (fallback) when invoice was sent without us tracking Stripe payment.
+                        // - non-Stripe users, OR
+                        // - Stripe users who exported/downloaded PDF (may have sent without link)
+                        if isManualPaymentWorkflow && (d.status.lowercased() == "sent" || d.status.lowercased() == "paid") {
+                            SectionBox(title: "Payment") {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(d.status.lowercased() == "paid" ? "Marked as paid" : "Was this invoice paid?")
+                                            .font(.subheadline.weight(.semibold))
+                                        Text("Only mark paid after you’ve sent the invoice.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+
+                                    Button {
+                                        Task {
+                                            try? await InvoiceService.markPaid(id: invoiceId)
+                                            await load()
+                                        }
+                                    } label: {
+                                        Label("Mark Paid", systemImage: "checkmark.seal.fill")
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(d.status.lowercased() != "sent") // ✅ only when sent
+                                }
+                            }
+                        }
                     }
                     .padding()
                 }
@@ -183,11 +271,37 @@ struct InvoiceDetailView: View {
                 }
                 .safeAreaInset(edge: .bottom) {
                     if let d = detail {
-                        BottomActionBar(
-                            total: d.total ?? 0,
-                            onOpen: { Task { await openPDFPreview() } },
-                            onSend: { sendTapped() }
-                        )
+                        VStack(spacing: 10) {
+
+                            // Prompt ONLY if: user downloaded/exported AND invoice still open AND prompt not dismissed
+                            if shouldShowMarkSentPrompt {
+                                MarkSentPromptCard(
+                                    isOn: $markSentConfirm,
+                                    onClose: {
+                                        dismissedMarkSentPrompt = true
+                                        markSentConfirm = false
+                                    },
+                                    onMarkSent: {
+                                        Task {
+                                            try? await InvoiceService.markSent(id: invoiceId)
+                                            await load()
+                                            await MainActor.run {
+                                                dismissedMarkSentPrompt = true
+                                                markSentConfirm = false
+                                            }
+                                        }
+                                    }
+                                )
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                            }
+
+                            BottomActionBar(
+                                total: d.total ?? 0,
+                                onOpen: { Task { await openPDFPreview() } },
+                                onSend: { sendTapped() }
+                            )
+                        }
+                        .padding(.bottom, 6)
                     }
                 }
             } else {
@@ -213,28 +327,85 @@ struct InvoiceDetailView: View {
                 Task { await load() }
             }
         }
-
+        .onChange(of: didDownloadPDF) { newValue in
+            guard newValue else { return }
+            Task { @MainActor in
+                maybeShowMarkSentPrompt()
+            }
+        }
+        .onChange(of: didExportPDF) { newValue in
+            guard newValue else { return }
+            Task { @MainActor in
+                maybeShowMarkSentPrompt()
+            }
+        }
         // Present after payload is ready; this avoids the first-time blank sheet.
         .sheet(item: $sharePayload) { payload in
             ActivitySheet(items: payload.items) { completed, activityType in
                 Task {
                     guard completed else { return }
-                    // Mark sent only for real “sending” activities
-                    let senders: Set<String> = [
-                        "com.apple.UIKit.activity.Message",
-                        "com.apple.UIKit.activity.Mail",
-                        "net.whatsapp.WhatsApp.ShareExtension"
+
+                    // Treat any completed share/save/export as a PDF export signal
+                    await MainActor.run {
+                        self.didExportPDF = true
+                        self.didDownloadPDF = true
+                        self.persistPDFSavedLocally() // immediate UI
+                    }
+                    // Persist remotely so InvoiceListView can show the PDF icon.
+                    await persistPDFSaved()
+
+                    // Detect true "send" actions (vs. Save/Files/Print/Copy).
+                    // We auto-mark Sent only for obvious sender channels.
+                    let isAppleSender: Bool = {
+                        guard let type = activityType else { return false }
+                        return type == .message || type == .mail
+                    }()
+
+                    // Some common third-party sender extensions expose only raw identifiers.
+                    let senderRawIDs: Set<String> = [
+                        // WhatsApp
+                        "net.whatsapp.WhatsApp.ShareExtension",
+                        // Gmail / Outlook / Telegram / Signal often vary; keep this list conservative.
+                        // Add more here if you confirm exact raw values in logs.
                     ]
+
                     let raw = activityType?.rawValue ?? ""
-                    if senders.contains(raw) {
+                    let isSender = isAppleSender || senderRawIDs.contains(raw)
+
+                    if isSender {
+                        // True send → mark as sent automatically
                         try? await InvoiceService.markSent(id: invoiceId)
                         await load()
+
+                        await MainActor.run {
+                            self.dismissedMarkSentPrompt = true
+                            self.markSentConfirm = false
+                        }
+                    } else {
+                        // Save/Copy/Print/etc → prompt manual “Mark Sent?” when allowed.
+                        await MainActor.run {
+                            maybeShowMarkSentPrompt()
+                        }
                     }
                 }
             }
         }
         .sheet(item: $previewItem) { item in
-            PDFPreviewSheet(url: item.url, invoiceId: invoiceId)
+            PDFPreviewSheet(
+                url: item.url,
+                invoiceId: invoiceId,
+                onDidDownload: {
+                    Task { @MainActor in
+                        didDownloadPDF = true
+                        didExportPDF = true
+                        persistPDFSavedLocally() // immediate UI
+                        maybeShowMarkSentPrompt()
+                    }
+                    Task {
+                        await persistPDFSaved()
+                    }
+                }
+            )
         }
         .sheet(isPresented: $showProcessingFeeDisclaimer) {
             ProcessingFeeDisclaimerSheet(
@@ -254,6 +425,19 @@ struct InvoiceDetailView: View {
             )
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
+        }
+    }
+
+    // Ensures the “Mark as sent?” footer appears after any real PDF export/save when we can’t reliably detect sending (non-Stripe, or Stripe connected with no payment link).
+    @MainActor
+    private func maybeShowMarkSentPrompt() {
+        guard let d = detail else { return }
+        guard d.status.lowercased() == "open" else { return }
+        let pdfSaved = (didPersistPDFSaved || didDownloadPDF || didExportPDF)
+        guard pdfSaved else { return }
+
+        withAnimation(.spring()) {
+            dismissedMarkSentPrompt = false
         }
     }
 
@@ -286,19 +470,40 @@ struct InvoiceDetailView: View {
                 AmountPill(currency(d.total ?? 0, d.currency))
             }
 
-            HStack(spacing: 14) {
-                if let issuedOrCreated = (d.issued_at ?? d.created_at) {
-                    Label(shortDate(issuedOrCreated), systemImage: "calendar")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                // Dates row
+                HStack(spacing: 14) {
+                    if let issuedOrCreated = (d.issued_at ?? d.created_at) {
+                        Label(shortDate(issuedOrCreated), systemImage: "calendar")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let due = d.dueDate {
+                        Label(shortDate(due), systemImage: "clock")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
                 }
-                if let due = d.dueDate {
-                    Label(shortDate(due), systemImage: "clock")
-                        .font(.subheadline)
+
+                // Status + indicators + description row (below dates)
+                let shown = displayStatus(dStatus: d.status, sentAt: dSentAt(d))
+
+                HStack(spacing: 10) {
+                    StatusChip(status: shown)
+                    indicatorIcons(
+                        status: shown,
+                        hasCheckoutURL: hasCheckoutURL,
+                        pdfSaved: (didPersistPDFSaved || didDownloadPDF || didExportPDF)
+                    )
+                    Text(statusDescription(for: shown))
+                        .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    Spacer()
                 }
-                Spacer()
-                StatusChip(status: displayStatus(dStatus: d.status, sentAt: dSentAt(d)))
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding()
@@ -363,9 +568,28 @@ struct InvoiceDetailView: View {
         error = nil
         do {
             let d = try await InvoiceService.fetchInvoiceDetail(id: invoiceId)
-            await MainActor.run { detail = d; isLoading = false }
+
+            // fetch stripe status (global per-user)
+            let status = await IA_fetchStripeStatus()
+            let connected = (status?.connected == true)
+            let pdfSaved = didPersistPDFSaved
+            
+            await MainActor.run {
+                detail = d
+                stripeConnected = connected
+                isLoading = false
+
+                // If a PDF was previously exported (indicator present) and invoice is still open,
+                // keep the “Mark as sent?” banner available.
+                if didPersistPDFSaved {
+                    maybeShowMarkSentPrompt()
+                }
+            }
         } catch {
-            await MainActor.run { self.error = error.localizedDescription; self.isLoading = false }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.isLoading = false
+            }
         }
     }
 
@@ -373,7 +597,9 @@ struct InvoiceDetailView: View {
         guard let d = detail else { return }
         do {
             let url = try await PDFGenerator.makeInvoicePDF(detail: d)
-            await MainActor.run { self.previewItem = PDFPreviewItem(url: url) }
+            await MainActor.run {
+                self.previewItem = PDFPreviewItem(url: url)
+            }
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
         }
@@ -383,6 +609,12 @@ struct InvoiceDetailView: View {
         do {
             // 1) Attempt to create/refresh checkout link (optional)
             let payURL = try await InvoiceService.sendInvoice(id: invoiceId)
+            await MainActor.run {
+                if payURL != nil { self.didCreatePayLink = true }
+            }
+            await MainActor.run {
+                didCreatePaymentLinkThisSession = (payURL != nil)
+            }
 
             // 2) Fresh PDF
             guard let d = detail else { return }
@@ -536,20 +768,97 @@ struct InvoiceDetailView: View {
         return out.string(from: date)
     }
 
+    private func parseInvoiceDate(_ s: String) -> Date? {
+        let fmts: [String] = [
+            "yyyy-MM-dd",
+            "yyyy-MM-dd'T'HH:mm:ssXXXXX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX",
+            "yyyy-MM-dd'T'HH:mm:ssZ"
+        ]
+        let inDF = DateFormatter()
+        inDF.locale = Locale(identifier: "en_US_POSIX")
+        inDF.timeZone = TimeZone(secondsFromGMT: 0)
+        for f in fmts {
+            inDF.dateFormat = f
+            if let d = inDF.date(from: s) { return d }
+        }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        if let d = iso.date(from: s) { return d }
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return iso.date(from: s)
+    }
+
     private func dSentAt(_ d: InvoiceDetail) -> String? {
         // If/when you include sent_at in InvoiceDetail, you can surface it here
         return nil
     }
 
     private func displayStatus(dStatus: String, sentAt: String?) -> String {
-        // If you later include sent_at: if dStatus == "open" && sentAt != nil → "sent"
-        return dStatus
+        // Frontend-derived status so Detail view matches the list logic.
+        // Only invoices that were actually sent (or already marked overdue) can be considered overdue.
+        let s = dStatus.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        // If backend already says paid/overdue, respect it.
+        if s == "paid" || s == "overdue" { return s }
+
+        // Only sent invoices can become overdue.
+        if s != "sent" { return s }
+
+        // If due date is in the past (and not paid), show overdue.
+        guard let d = detail, let dueStr = d.dueDate, let dueDate = parseInvoiceDate(dueStr) else {
+            return s
+        }
+
+        let todayStart = Calendar.current.startOfDay(for: Date())
+        let dueStart = Calendar.current.startOfDay(for: dueDate)
+
+        if dueStart < todayStart {
+            return "overdue"
+        }
+
+        return s
+    }
+
+    private func statusDescription(for status: String) -> String {
+        switch status.lowercased() {
+        case "open": return "Invoice created"
+        case "sent": return "Invoice link sent to client"
+        case "paid": return "Client paid invoice in full"
+        case "overdue": return "Due date passed and invoice is unpaid"
+        default: return ""
+        }
+    }
+
+    @ViewBuilder
+    private func indicatorIcons(status: String, hasCheckoutURL: Bool, pdfSaved: Bool) -> some View {
+        HStack(spacing: 8) {
+            let s = status.lowercased()
+            let isSentLike = (s == "sent" || s == "paid" || s == "overdue")
+
+            // PDF indicator: ONLY after the user exported/downloaded a PDF (persisted per invoice).
+            if pdfSaved {
+                Image(systemName: "doc")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("PDF saved")
+            }
+
+            // Link indicator: ONLY when invoice is sent-like AND link exists AND Stripe is connected.
+            if stripeConnected && hasCheckoutURL && isSentLike {
+                Image(systemName: "link")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Payment link sent")
+            }
+        }
     }
 }
 
 // MARK: - Processing Fee Disclaimer (Apple glass style)
 private struct ProcessingFeeDisclaimerSheet: View {
     let invoiceNumber: String?
+    
     let onCancel: () -> Void
     let onContinue: () -> Void
     let onDontShowAgain: () -> Void
@@ -657,6 +966,7 @@ private struct StatusChip: View {
 private struct PDFPreviewSheet: View {
     let url: URL
     let invoiceId: UUID
+    let onDidDownload: () -> Void
 
     // two-phase share payload (prevents first-open blank sheet)
     private struct SharePayload: Identifiable {
@@ -665,6 +975,7 @@ private struct PDFPreviewSheet: View {
     }
 
     @State private var payload: SharePayload? = nil
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -686,7 +997,16 @@ private struct PDFPreviewSheet: View {
         }
         // present AFTER payload is ready (prevents blank sheet on first try)
         .sheet(item: $payload) { p in
-            ActivitySheet(items: p.items)
+            ActivitySheet(items: p.items) { completed, _ in
+                guard completed else { return }
+                onDidDownload()
+                dismiss() // ✅ return to invoice detail view immediately after export
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Done") { dismiss() }
+            }
         }
     }
 
@@ -742,6 +1062,73 @@ private struct ActivitySheet: UIViewControllerRepresentable {
         return vc
     }
     func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+
+private struct MarkSentPromptCard: View {
+    @Binding var isOn: Bool
+    let onClose: () -> Void
+    let onMarkSent: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(Color.yellow.opacity(0.18))
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.yellow)
+                }
+                .frame(width: 30, height: 30)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Mark as sent?")
+                        .font(.subheadline.weight(.semibold))
+                    Text("If you exported the PDF and sent it to your client, you can mark this invoice as sent.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                Spacer()
+
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .padding(8)
+                        .background(.thinMaterial)
+                        .clipShape(Circle())
+                }
+            }
+
+            HStack {
+                Text("I sent this invoice")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Toggle("", isOn: $isOn)
+                    .labelsHidden()
+            }
+
+            Button(action: onMarkSent) {
+                Text("Mark Sent")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!isOn)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.18))
+        )
+        .shadow(color: .black.opacity(0.10), radius: 12, y: 6)
+        .padding(.horizontal, 12)
+    }
 }
 
 // Bottom action bar for invoice actions

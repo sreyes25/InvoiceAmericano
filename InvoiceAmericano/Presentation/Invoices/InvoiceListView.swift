@@ -25,6 +25,7 @@ struct InvoiceListView: View {
     @State private var search: String = ""
     @FocusState private var searchFocused: Bool
     @Namespace private var statusNS
+    @State private var didInitialLoad = false
 
     // MARK: - Sections
 
@@ -110,7 +111,7 @@ struct InvoiceListView: View {
     private func statusTint(_ s: InvoiceStatus) -> Color {
         switch s {
         case .all: return .gray
-        //case .open: return .blue
+        case .open: return .blue
         case .sent: return .orange
         case .overdue: return .red
         case .paid: return .green
@@ -257,7 +258,16 @@ struct InvoiceListView: View {
             .sheet(item: $sharePayload, content: { payload in
                 ActivitySheet(items: payload.items, onComplete: onShareCompleted)
             })
-            .task { await load() }
+            .task {
+                didInitialLoad = true
+                await load()
+            }
+            .onAppear {
+                // When returning from InvoiceDetailView (e.g., after downloading a PDF),
+                // reload so persisted indicators like `pdf_saved_at` show up.
+                guard didInitialLoad else { return }
+                Task { await load() }
+            }
             .onChange(of: status) { _, _ in
                 Task { await load() }
             }
@@ -265,6 +275,8 @@ struct InvoiceListView: View {
             .scrollIndicators(.hidden)
         }
     }
+    
+    
 
     private var searchBar: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -371,16 +383,19 @@ struct InvoiceListView: View {
 
             // 3) On the main thread, close the sheet + jump to detail
             await MainActor.run {
-                // this controls the New Invoice sheet
+                // Clear any stale share state (prevents surprise sheets)
+                self.sharePayload = nil
+                self.isSendingId = nil
+
+                // Close the New Invoice sheet
                 self.showNew = false
 
-                // this triggers your existing navigationDestination:
-                // .navigationDestination(item: $pushInvoiceId) { InvoiceDetailView(invoiceId: $0) }
+                // Navigate to the newly created invoice detail
                 self.pushInvoiceId = created.id
             }
 
-            // Note: We no longer auto-present the share sheet after creating an invoice.
-            // Users can share from the invoice detail screen (or swipe actions) instead.
+            // We do NOT auto-present the share sheet after creating an invoice.
+            // Sharing happens from the detail screen or via swipe actions.
         } catch {
             await MainActor.run {
                 self.error = error.friendlyMessage
@@ -415,6 +430,10 @@ struct InvoiceListView: View {
                 }
                 AnalyticsService.track(.invoiceSent, metadata: ["channel": channel])
             }
+            // Any completed share/export counts as the user exporting/downloading the PDF.
+            // Persist this so the list can show the PDF icon (pdf_saved_at).
+            try? await InvoiceService.markPDFSaved(id: id)
+            await load()
             await MainActor.run {
                 self.isSendingId = nil
                 self.sharePayload = nil
@@ -431,6 +450,40 @@ struct InvoiceListView: View {
         return false
     }
 
+    // MARK: - Overdue (UI-computed)
+
+    private func parseInvoiceDate(_ s: String) -> Date? {
+        let fmts: [String] = [
+            "yyyy-MM-dd",
+            "yyyy-MM-dd'T'HH:mm:ssXXXXX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX",
+            "yyyy-MM-dd'T'HH:mm:ssZ"
+        ]
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = TimeZone(secondsFromGMT: 0)
+        for f in fmts {
+            df.dateFormat = f
+            if let d = df.date(from: s) { return d }
+        }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        if let d = iso.date(from: s) { return d }
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return iso.date(from: s)
+    }
+
+    private func isInvoiceOverdue(_ inv: InvoiceRow) -> Bool {
+        // UI rule: overdue only if it was SENT (or already labeled overdue), NOT paid,
+        // and due date has passed. We intentionally do NOT treat `sent_at` as sent.
+        let s = inv.status.lowercased()
+        guard s != "paid" else { return false }
+        guard s == "sent" || s == "overdue" else { return false }
+        guard let dueStr = inv.dueDate, let due = parseInvoiceDate(dueStr) else { return false }
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        return due < startOfToday
+    }
+
     private func load() async {
         await MainActor.run {
             isLoading = true
@@ -440,8 +493,18 @@ struct InvoiceListView: View {
 
         do {
             let rows = try await InvoiceService.fetchInvoices(status: status)
+
+            // Overdue tab is computed client-side:
+            // An invoice is overdue if it was sent (or sent-like), not paid, and the due date is before today.
+            let filtered: [InvoiceRow]
+            if status == .overdue {
+                filtered = rows.filter { isInvoiceOverdue($0) }
+            } else {
+                filtered = rows
+            }
+
             await MainActor.run {
-                invoices = rows
+                invoices = filtered
                 isLoading = false
             }
         } catch {
@@ -461,19 +524,9 @@ struct InvoiceListView: View {
     private func send(_ inv: InvoiceRow) async {
         // don't clear isSendingId here; we clear it after share completes/cancels
         do {
-            // 1) Ask for the pay link; if not ready, do a very short retry loop
-            var payURL: URL?
-            for _ in 0..<6 { // up to ~1.8s total
-                if let u = try await InvoiceService.sendInvoice(id: inv.id) {
-                    payURL = u
-                    break
-                }
-                try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
-            }
-            guard let payURL else {
-                await MainActor.run { self.error = "Could not create payment link yet. Please try again." }
-                return
-            }
+            // 1) Attempt to create/refresh checkout link (optional)
+            //    If Stripe isn't connected yet, this can legitimately return nil.
+            let payURL = try await InvoiceService.sendInvoice(id: inv.id)
 
             // 2) Build the PDF (this is synchronous & writes a real file)
             let detail = try await InvoiceService.fetchInvoiceDetail(id: inv.id)
@@ -491,14 +544,12 @@ struct InvoiceListView: View {
                 await MainActor.run { self.error = "PDF wasn’t ready. Please try again." }
                 return
             }
-
-            // 4) Set items first, then present the sheet after a tiny delay
-            await MainActor.run {
-                self.sharePayload = nil
-            }
+            // 4) Present the share sheet in two phases to avoid blank share sheet
+            await MainActor.run { self.sharePayload = nil }
             try? await Task.sleep(nanoseconds: 350_000_000) // allow swipe animation & share extensions to warm up
             await MainActor.run {
-                let items: [Any] = ["Invoice \(detail.number)", pdfURL, payURL]
+                var items: [Any] = ["Invoice \(detail.number)", pdfURL]
+                if let payURL { items.append(payURL) }
                 self.sharePayload = SharePayload(items: items)
             }
         } catch {
@@ -557,12 +608,35 @@ private struct InvoiceRowCell: View {
 
             Spacer()
 
-            // Amount + status
+            // Amount + status (+ subtle secondary indicators)
             VStack(alignment: .trailing, spacing: 6) {
                 Text(currency(inv.total))
                     .font(.subheadline)
                     .monospacedDigit()
-                StatusChip(status: displayStatus(inv))
+
+                HStack(spacing: 6) {
+                    let sentLike = ["sent", "paid", "overdue"].contains(displayStatus(inv))
+
+                    // Secondary indicator: PDF icon should ONLY appear after the user has downloaded/exported the PDF.
+                    // This is persisted in DB via `pdf_saved_at`.
+                    if inv.pdf_saved_at != nil {
+                        Image(systemName: "doc")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("PDF downloaded")
+                    }
+
+                    // Link indicator: ONLY show if the invoice is sent-like AND the backend actually has a checkout url.
+                    // (Open invoices can have a link generated, but we don't surface it until it's sent.)
+                    if sentLike, (inv.checkout_url?.isEmpty == false) {
+                        Image(systemName: "link")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Payment link")
+                    }
+
+                    StatusChip(status: displayStatus(inv))
+                }
             }
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold))
@@ -592,8 +666,45 @@ private struct InvoiceRowCell: View {
     }
 
     private func displayStatus(_ inv: InvoiceRow) -> String {
-        if inv.status == "open", inv.sent_at != nil { return "sent" }
-        return inv.status
+        let s = inv.status.lowercased()
+
+        // UI rule: show overdue when it was sent, not paid, and due date has passed.
+        if isOverdue(inv) {
+            return "overdue"
+        }
+
+        // Otherwise reflect backend status.
+        return s
+    }
+
+    private func isOverdue(_ inv: InvoiceRow) -> Bool {
+        let s = inv.status.lowercased()
+        guard s != "paid" else { return false }
+        guard s == "sent" || s == "overdue" else { return false }
+        guard let dueStr = inv.dueDate, let due = parseDate(dueStr) else { return false }
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        return due < startOfToday
+    }
+
+    private func parseDate(_ s: String) -> Date? {
+        let fmts: [String] = [
+            "yyyy-MM-dd",
+            "yyyy-MM-dd'T'HH:mm:ssXXXXX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX",
+            "yyyy-MM-dd'T'HH:mm:ssZ"
+        ]
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = TimeZone(secondsFromGMT: 0)
+        for f in fmts {
+            df.dateFormat = f
+            if let d = df.date(from: s) { return d }
+        }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        if let d = iso.date(from: s) { return d }
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return iso.date(from: s)
     }
 
     private func currency(_ total: Double?) -> String {
@@ -627,7 +738,7 @@ private struct StatusChip: View {
         switch status {
         case "paid": return .green
         case "overdue": return .red
-        case "sent": return .yellow
+        case "sent": return .orange
         case "open": return .blue
         default: return .gray
         }
@@ -659,6 +770,7 @@ private struct AnimatedInvoicesBackground: View {
     private func tint(for status: InvoiceStatus) -> Color {
         switch status {
         case .all: return .gray
+        case .open: return .blue
         case .sent: return .orange
         case .overdue: return .red
         case .paid: return .green

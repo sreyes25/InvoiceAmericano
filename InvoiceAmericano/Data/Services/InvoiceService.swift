@@ -78,6 +78,7 @@ private struct CreateCheckoutResponse: Decodable {
 }
 
 private struct _SentUpdate: Encodable { let status: String; let sent_at: String }
+private struct _PaidUpdate: Encodable { let status: String; let paid_at: String }
 
 // MARK: - Service
 
@@ -100,7 +101,7 @@ enum InvoiceService {
         let rows: [InvoiceRow] = try await client
             .from("invoices")
             .select("""
-                id, number, status, total, currency, created_at, due_date, client_id,
+                id, number, status, total, currency, created_at, due_date, sent_at, checkout_url, pdf_saved_at, client_id,
                 client:clients!invoices_client_id_fkey(name)
             """)
             .eq("user_id", value: uid)
@@ -175,7 +176,7 @@ enum InvoiceService {
 
         let query = client
             .from("invoices")
-            .select("id, number, status, total, created_at, due_date, client_id, client:clients!invoices_client_id_fkey(name, color_hex)")
+            .select("id, number, status, total, created_at, due_date, sent_at, checkout_url, pdf_saved_at, client_id, client:clients!invoices_client_id_fkey(name, color_hex)")
             .eq("user_id", value: uid)
             .order("created_at", ascending: false)
 
@@ -189,21 +190,26 @@ enum InvoiceService {
         // Client-side filter to support "overdue" virtual tab
         if case .overdue = status {
             let cal = Calendar.current
-            let today = cal.startOfDay(for: today)
+            let todayStart = cal.startOfDay(for: today)
 
             let iso = ISO8601DateFormatter()
-            var ymd: DateFormatter {
+            let ymd: DateFormatter = {
                 let d = DateFormatter()
                 d.dateFormat = "yyyy-MM-dd"
-                d.timeZone = TimeZone(secondsFromGMT: 0)   // <-- no fileprivate dependency
+                d.timeZone = TimeZone(secondsFromGMT: 0)
                 return d
-            }
+            }()
 
             return rows.filter { row in
                 guard let s = row.dueDate else { return false }
                 let due = ymd.date(from: s) ?? iso.date(from: s)
-                let isUnpaid = (row.status == "open" || row.status == "draft")
-                return isUnpaid && (due.map { cal.startOfDay(for: $0) < today } ?? false)
+
+                let isUnpaid = (row.status == "open" || row.status == "sent")
+                // Overdue only makes sense if the invoice was actually sent.
+                let wasSent = (row.sent_at != nil) || (row.status == "sent")
+                let isPastDue = (due.map { cal.startOfDay(for: $0) < todayStart } ?? false)
+
+                return wasSent && isUnpaid && isPastDue
             }
         }
 
@@ -298,24 +304,10 @@ enum InvoiceService {
         }
         _ = try await client.from("line_items").insert(itemsPayload).execute()
 
-        // ---- 8) Optionally create checkout and capture returned URL ----
-        var checkoutURL: URL? = nil
-        do {
-            let response: CreateCheckoutResponse = try await client.functions.invoke(
-                "create_checkout",
-                options: FunctionInvokeOptions(
-                    headers: ["Content-Type": "application/json"],
-                    body: CreateCheckoutRequest(invoice_id: invoiceId.uuidString, user_id: uid)
-                )
-            )
-            if let s = response.url, let u = URL(string: s) {
-                checkoutURL = u
-            }
-        } catch {
-            // ignore if function not deployed yet
-        }
-
-        return (invoiceId, checkoutURL)
+        // ---- 8) Do NOT create a checkout link on invoice creation ----
+        // Checkout links are only created when the user explicitly taps “Send”.
+        // This prevents Open invoices from appearing as Sent just because a link exists.
+        return (invoiceId, nil)
     }
 
     /// Creates/refreshes checkout session, stamps sent_at, and tries to fetch checkout_url.
@@ -356,6 +348,20 @@ enum InvoiceService {
             .execute()
     }
 
+    // Explicitly mark an invoice as paid (UI should only allow this after it is sent).
+    static func markPaid(id: UUID) async throws {
+        let client = SupabaseManager.shared.client
+        let uid = try requireUID()
+        let iso = ISO8601DateFormatter()
+
+        _ = try await client
+            .from("invoices")
+            .update(_PaidUpdate(status: "paid", paid_at: iso.string(from: Date())))
+            .match(["id": id.uuidString])
+            .eq("user_id", value: uid)
+            .execute()
+    }
+
     // Detail screen data (includes items & issued_at)
     static func fetchInvoiceDetail(id: UUID) async throws -> InvoiceDetail {
         let client = SupabaseManager.shared.client
@@ -363,7 +369,7 @@ enum InvoiceService {
         let detail: InvoiceDetail = try await client
             .from("invoices")
             .select("""
-                id, number, status, subtotal, tax, total, notes, currency, created_at, issued_at, due_date, checkout_url,
+                id, number, status, subtotal, tax, total, notes, currency, created_at, issued_at, due_date, checkout_url, pdf_saved_at,
                 client:clients!invoices_client_id_fkey(name, color_hex),
                 line_items(id, title, description, qty, unit_price, amount)
             """)
@@ -375,7 +381,22 @@ enum InvoiceService {
             .value
         return detail
     }
+    
+    // MARK: - Stamp PDF Saved
+    static func markPDFSaved(id: UUID) async throws {
+        let client = SupabaseManager.shared.client
+        let uid = try requireUID()
+        let iso = ISO8601DateFormatter()
+
+        _ = try await client
+            .from("invoices")
+            .update(["pdf_saved_at": iso.string(from: Date())])
+            .match(["id": id.uuidString])
+            .eq("user_id", value: uid)
+            .execute()
+    }
 }
+
 
 extension InvoiceService {
     /// Normalizes the user-provided line item draft into the payload saved to Supabase.

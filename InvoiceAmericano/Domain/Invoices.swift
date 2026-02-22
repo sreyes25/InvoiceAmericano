@@ -17,12 +17,16 @@ struct InvoiceRow: Identifiable, Decodable {
     let dueDate: String?      // maps from DB "due_date"
     let client: ClientRef?
     let sent_at: String?
+    let checkout_url: String?
+    let pdf_saved_at: String?
 
     enum CodingKeys: String, CodingKey {
         case id, number, status, total, client
         case created_at
         case dueDate = "due_date"
         case sent_at
+        case checkout_url
+        case pdf_saved_at
         case clientId = "client_id"
     }
 }
@@ -39,6 +43,7 @@ struct ClientRef: Decodable {
 
 enum InvoiceStatus: String, CaseIterable {
     case all = "All"
+    case open = "open"
     case sent = "sent"
     case paid = "paid"
     case overdue = "overdue"
