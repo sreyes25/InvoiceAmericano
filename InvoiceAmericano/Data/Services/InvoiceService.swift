@@ -253,9 +253,11 @@ enum InvoiceService {
         // you can fallback to defaults?.dueDays here.
         let dueDateStr = ymd.string(from: draft.dueDate)
 
-        // ---- 4) Notes: only what the user typed on the invoice ----
-        let trimmedNotes = draft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-        let effectiveNotes: String? = trimmedNotes.isEmpty ? nil : trimmedNotes
+        // ---- 4) Notes + per-invoice payment metadata ----
+        let effectiveNotes = InvoiceNotesCodec.compose(
+            userNotes: draft.notes,
+            payment: draft.paymentInfo
+        )
 
         // Tax / Total logic...
         let effectiveSubtotal = draft.subTotal

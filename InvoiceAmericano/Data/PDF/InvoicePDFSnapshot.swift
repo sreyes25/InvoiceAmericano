@@ -38,6 +38,7 @@ struct InvoicePDFSnapshot {
     let dueDate: Date?
 
     let notes: String?
+    let payment: InvoicePaymentInfo?
     let client: Client?
     let items: [LineItem]
 }
@@ -59,7 +60,9 @@ extension InvoicePDFSnapshot {
         self.issuedAt = Self.parseSupabaseDate(detail.issued_at ?? detail.created_at)
         self.dueDate  = Self.parseSupabaseDate(detail.dueDate)
 
-        self.notes = detail.notes
+        let parsedNotes = InvoiceNotesCodec.extract(from: detail.notes)
+        self.notes = parsedNotes.userNotes
+        self.payment = parsedNotes.payment
 
         if let c = detail.client {
             self.client = Client(
@@ -98,7 +101,11 @@ extension InvoicePDFSnapshot {
         self.issuedAt = Date()                      // "now" for preview
         self.dueDate  = draft.dueDate
 
-        self.notes = draft.notes.isEmpty ? nil : draft.notes
+        let parsedNotes = InvoiceNotesCodec.extract(
+            from: InvoiceNotesCodec.compose(userNotes: draft.notes, payment: draft.paymentInfo)
+        )
+        self.notes = parsedNotes.userNotes
+        self.payment = parsedNotes.payment
 
         if let c = draft.client {
             self.client = Client(

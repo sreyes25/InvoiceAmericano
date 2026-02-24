@@ -59,7 +59,9 @@ struct InvoiceAmericanoTests {
             created_at: nil,
             dueDate: formatter.string(from: yesterday),
             client: nil,
-            sent_at: nil
+            sent_at: nil,
+            checkout_url: nil,
+            pdf_saved_at: nil
         )
 
         let paidRow = InvoiceRow(
@@ -71,7 +73,9 @@ struct InvoiceAmericanoTests {
             created_at: nil,
             dueDate: formatter.string(from: yesterday),
             client: nil,
-            sent_at: nil
+            sent_at: nil,
+            checkout_url: nil,
+            pdf_saved_at: nil
         )
 
         let futureRow = InvoiceRow(
@@ -83,7 +87,9 @@ struct InvoiceAmericanoTests {
             created_at: nil,
             dueDate: formatter.string(from: nextWeek),
             client: nil,
-            sent_at: nil
+            sent_at: nil,
+            checkout_url: nil,
+            pdf_saved_at: nil
         )
 
         let filtered = InvoiceService.filterInvoices([overdueRow, paidRow, futureRow], status: .overdue, today: today)
@@ -109,5 +115,23 @@ struct InvoiceAmericanoTests {
         let message = RealtimeService.notificationMessage(for: event)
         #expect(message?.title == "Invoice Paid")
         #expect(message?.body.contains("paid") == true)
+    }
+
+    @Test func invoiceNotesCodecRoundTripIncludesPaymentMetadata() {
+        let payment = InvoicePaymentInfo(method: .zelle, details: "sergio@example.com", mailingAddress: nil)
+        let stored = InvoiceNotesCodec.compose(userNotes: "Thanks for your business", payment: payment)
+        let parsed = InvoiceNotesCodec.extract(from: stored)
+
+        #expect(parsed.userNotes == "Thanks for your business")
+        #expect(parsed.payment == payment)
+    }
+
+    @Test func invoiceNotesCodecIgnoresNonePaymentMethod() {
+        let payment = InvoicePaymentInfo(method: .none, details: "ignored", mailingAddress: nil)
+        let stored = InvoiceNotesCodec.compose(userNotes: "Only note", payment: payment)
+        let parsed = InvoiceNotesCodec.extract(from: stored)
+
+        #expect(parsed.userNotes == "Only note")
+        #expect(parsed.payment == nil)
     }
 }

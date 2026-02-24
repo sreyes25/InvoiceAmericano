@@ -89,7 +89,20 @@ struct InvoiceDraft {
     var currency: String = "USD"
     var taxPercent: Double = 0
     var notes: String = ""
+    var paymentMethod: InvoicePaymentMethod = .none
+    var paymentDetails: String = ""
+    var paymentAddress: String = ""
     var items: [LineItemDraft] = []
+
+    var paymentInfo: InvoicePaymentInfo? {
+        let details = paymentDetails.trimmingCharacters(in: .whitespacesAndNewlines)
+        let address = paymentAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        return InvoicePaymentInfo(
+            method: paymentMethod,
+            details: details.isEmpty ? nil : details,
+            mailingAddress: address.isEmpty ? nil : address
+        )
+    }
 
     var subTotal: Double {
         items.reduce(0) { $0 + ($1.unitPrice * Double(max(1, $1.quantity))) }
@@ -152,6 +165,7 @@ struct NewInvoiceView: View {
     @State private var clientSearch = ""
     @State private var showNewClientSheet = false
     @State private var showDueDateSheet = false
+    @State private var showPaymentSheet = false
     @State private var showItemPicker = false
     @State private var expandedItemIDs: Set<UUID> = []
     @StateObject private var itemVM = ItemDraftViewModel()
@@ -159,6 +173,7 @@ struct NewInvoiceView: View {
 
     @State private var totalsOnScreen: Bool = false
     @State private var footerOpacity: Double = 1
+    @State private var stripeConnectedForPaymentMethod = false
 
     // Track if user manually changed due date, so defaults don't overwrite it later
     @State private var didUserChangeDueDate = false
@@ -166,11 +181,27 @@ struct NewInvoiceView: View {
     // Prevents saving 0-dollar invoices
     private var canSave: Bool {
         guard draft.client != nil else { return false }
+        if draft.paymentMethod.requiresDetails &&
+            draft.paymentDetails.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return false
+        }
+        if draft.paymentMethod.requiresAddress &&
+            draft.paymentAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return false
+        }
         return draft.total > 0 && draft.items.contains { li in
             let hasContent = !li.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                              !li.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             return hasContent && li.unitPrice > 0 && li.quantity > 0
         }
+    }
+
+    private var paymentMethodOptions: [InvoicePaymentMethod] {
+        var methods: [InvoicePaymentMethod] = [.none, .zelle, .check]
+        if stripeConnectedForPaymentMethod {
+            methods.append(.stripe)
+        }
+        return methods
     }
 
     init(preselectedClient: ClientRow? = nil,
@@ -187,377 +218,416 @@ struct NewInvoiceView: View {
             currency: "USD",
             taxPercent: 0,
             notes: "",
+            paymentMethod: .none,
+            paymentDetails: "",
+            paymentAddress: "",
             items: []
         )
         _draft = State(initialValue: initial)
     }
 
     var body: some View {
-        return GeometryReader { geo in
-            let containerHeight = geo.size.height
-            Form {
-                // --- Header (Client + Details + Notes) grouped in one card ---
-                Section {
-                    TopInvoiceCard(
-                        selectedClient: draft.client,
-                        lockClient: lockClient,
-                        isLoading: isLoadingClients,
-                        onTapClient: { showClientPicker = true },
-                        date: draft.dueDate,
-                        invoiceNumber: draft.number,
-                        taxPercent: draft.taxPercent,
-                        taxAmount: draft.taxAmount,
-                        onTapDetails: { showDueDateSheet = true },
-                        noteText: draft.notes,
-                        onTapNotes: { showDueDateSheet = true }
-                    )
-                    .listRowBackground(Color.clear)
-                } header: {
-                    Text("Invoice")
-                }
+        GeometryReader { geo in
+            contentView(containerHeight: geo.size.height)
+        }
+    }
 
-                // --- Items grouped in one card (Add button inside) ---
-                Section {
-                    ItemsGroupCard(
-                        items: $draft.items,
-                        expandedItemIDs: $expandedItemIDs,
-                        onAddTap: {
-                            itemVM.title = ""
-                            itemVM.description = ""
-                            itemVM.quantity = 1
-                            itemVM.unitPrice = 0
-                            showItemPicker = true
-                        }
-                    )
-                    .listRowBackground(Color.clear)
-                } header: {
-                    Text("Items")
-                }
-
-                // --- Totals grouped in one card with bold divider before Total ---
-                Section {
-                    TotalsCard(
-                        subTotal: draft.subTotal,
-                        taxAmount: draft.taxAmount,
-                        total: draft.total,
-                        currencyCode: draft.currency
-                    )
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear
-                                .preference(key: ViewYPreferenceKey.self,
-                                            value: proxy.frame(in: .named("formScroll")).minY)
-                        }
-                    )
-                    .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
-                    .listRowBackground(Color.clear)
-                } header: {
-                    Text("Totals")
-                }
-
-                if let error {
-                    Section { Text(error).foregroundStyle(.red) }
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(Color(.systemBackground).ignoresSafeArea())
-            .listStyle(.plain)
-            .navigationTitle("New Invoice")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Preview") {
-                        Task {
-                            await generatePreviewPDF()
-                        }
-                    }
-                    .disabled(!canSave)
-                }
-            }
-            .tint(themeColor)
-            .animation(.easeInOut(duration: 0.25), value: themeColor)
-            .coordinateSpace(name: "formScroll")
-            .listRowSpacing(UI.rowV) // keep vertical rhythm between rows
-            // Sticky, translucent running-total bar (“Apple glass” look)
-            .safeAreaInset(edge: .bottom) {
-                HStack {
-                    Text("Total")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text(currency(draft.total, code: draft.currency))
-                        .font(.headline.weight(.semibold))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(Color.white.opacity(0.25))
-                )
-                .shadow(color: .black.opacity(0.15), radius: 12, y: 2)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
-                .opacity(footerOpacity)
-                .allowsHitTesting(footerOpacity > 0.05)
-                .animation(.easeInOut(duration: 0.20), value: footerOpacity)
-            }
-            .onPreferenceChange(ViewYPreferenceKey.self) { totalsTopY in
-                // Where the sticky footer lives on screen
-                let footerHeight: CGFloat = 64
-                let footerBottomPadding: CGFloat = 8
-                let contactY = containerHeight - footerHeight - footerBottomPadding
-
-                // Start the fade a bit BEFORE the totals card reaches the footer so it
-                // feels like it melts away as the Totals section approaches.
-                let fadeLead: CGFloat = 190   // how early the fade should begin
-                let fadeRange: CGFloat = 160  // how long the fade lasts
-
-                // Positive distance means we are still above the fade start.
-                let distance = totalsTopY - (contactY + fadeLead)
-
-                // Map distance into [0,1] for opacity where 1 = fully visible, 0 = gone.
-                let clamped = max(0, min(1, distance / fadeRange))
-                footerOpacity = Double(clamped)
-
-                // Optional flag if you still want it
-                totalsOnScreen = distance <= fadeRange
-            }
-            // Collapse any expanded item editors only after a deliberate drag end with threshold
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 12)
-                    .onEnded { value in
-                        let dx = abs(value.translation.width)
-                        let dy = abs(value.translation.height)
-                        if max(dx, dy) > 24 {
-                            if !expandedItemIDs.isEmpty {
-                                expandedItemIDs.removeAll()
-                            }
-                        }
-                    }
-            )
-            // Load clients
-            .sheet(isPresented: $showClientPicker) {
-                ClientPickerSheet(
-                    clients: clients,
-                    isLoading: isLoadingClients,
-                    searchText: $clientSearch,
-                    onCancel: { showClientPicker = false },
-                    onSelect: { selected in
-                        draft.client = selected
-                        showClientPicker = false
-                        // After choosing a client, open the item picker to keep the flow fast
-                        showItemPicker = true
-                    },
-                    onCreateNew: {
-                        showNewClientSheet = true
-                    }
-                )
-                .presentationDetents([.large])
-                .presentationCornerRadius(28)
-                .presentationBackground(.ultraThinMaterial)
-                .presentationDragIndicator(.visible)
-                .sheet(isPresented: $showNewClientSheet) {
-                    NavigationStack {
-                        NewClientView {
-                            // After creating a client, refresh list so it appears
-                            showNewClientSheet = false
-                            Task { await loadClients() }
-                        }
-                    }
-                }
-            }
-            // Item quick-pick / create sheet
-            .sheet(isPresented: $showItemPicker) {
-                ItemPickerSheet(
-                    viewModel: itemVM,
-                    currentItemIndex: draft.items.count + 1,
-                    presets: ["Service call", "Labor hour", "Materials", "Cleanup"],
-                    onAdd: { newItem in
-                        var item = newItem
-                        // If the user only filled the title (or used a quick pick), promote it
-                        // into the description so the saved invoice has visible line text.
-                        let trimmedTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let trimmedDesc  = item.description.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if trimmedDesc.isEmpty, !trimmedTitle.isEmpty {
-                            item.description = trimmedTitle
-                        }
-
-                        draft.items.append(item)
-                        showItemPicker = false
-                    },
-                    onClose: { showItemPicker = false }
-                )
-                .presentationDetents([.large])
-                .presentationCornerRadius(28)
-                .presentationBackground(.ultraThinMaterial)
-                .presentationDragIndicator(.visible)
-            }
-            .sheet(isPresented: $showDueDateSheet) {
-                NavigationStack {
-                    Form {
-                        Section {
-                            DatePicker("Due date", selection: $draft.dueDate, displayedComponents: .date)
-                            TextField("Invoice #", text: $draft.number)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled(true)
-                            HStack {
-                                Text("Tax %")
-                                Spacer()
-                                TextField("0", value: $draft.taxPercent, format: .number)
-                                    .keyboardType(.decimalPad)
-                                    .multilineTextAlignment(.trailing)
-                                    .frame(width: 80)
-                            }
-                        }
-                        Section {
-                            TextField("Notes", text: $draft.notes, axis: .vertical)
-                                .lineLimit(3...6)
-                        }
-                    }
-                    .navigationTitle("Invoice details")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showDueDateSheet = false } }
-                        ToolbarItem(placement: .confirmationAction) { Button("Done") { showDueDateSheet = false } }
-                    }
-                }
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-                .onChange(of: draft.dueDate) { _, _ in
-                    didUserChangeDueDate = true
-                }
-            }
-            .sheet(isPresented: $isShowingPreview) {
-                NavigationStack {
-                    VStack(spacing: 0) {
-                        if let data = pdfData {
-                            // Real PDF preview
-                            DraftPDFKitView(data: data)
-                                .ignoresSafeArea()
-                        } else {
-                            // Fallback while PDF is being generated or not available
-                            VStack(spacing: 20) {
-                                Text("Invoice Preview")
-                                    .font(.title2.bold())
-                                    .padding(.top)
-
-                                if isGeneratingPDF {
-                                    ProgressView("Generating PDF…")
-                                        .padding()
-                                }
-
-                                // Textual fallback preview
-                                List {
-                                    Section("Client") {
-                                        if let client = draft.client {
-                                            Text(client.name)
-                                            if let email = client.email, !email.isEmpty {
-                                                Text(email).foregroundStyle(.secondary)
-                                            }
-                                        } else {
-                                            Text("No client selected").foregroundStyle(.secondary)
-                                        }
-                                    }
-
-                                    Section("Details") {
-                                        Text("Invoice #: \(draft.number.isEmpty ? "—" : draft.number)")
-                                        Text("Due: \(draft.dueDate.formatted(date: .abbreviated, time: .omitted))")
-                                        Text("Tax: \(draft.taxPercent, format: .number)\u{202F}%")
-                                    }
-
-                                    Section("Items") {
-                                        if draft.items.isEmpty {
-                                            Text("No items").foregroundStyle(.secondary)
-                                        } else {
-                                            ForEach(Array(draft.items.enumerated()), id: \.element.id) { index, item in
-                                                VStack(alignment: .leading, spacing: 4) {
-                                                    Text(item.title.isEmpty ? "Item \(index + 1)" : item.title)
-                                                        .font(.headline)
-                                                    if !item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                                        Text(item.description)
-                                                            .font(.subheadline)
-                                                            .foregroundStyle(.secondary)
-                                                    }
-                                                    HStack {
-                                                        Text("Qty: \(item.quantity)")
-                                                        Spacer()
-                                                        Text(item.unitPrice, format: .currency(code: draft.currency))
-                                                    }
-                                                    .font(.footnote)
-                                                }
-                                                .padding(.vertical, 4)
-                                            }
-                                        }
-                                    }
-
-                                    Section("Totals") {
-                                        HStack {
-                                            Text("Subtotal")
-                                            Spacer()
-                                            Text(draft.subTotal, format: .currency(code: draft.currency))
-                                        }
-                                        HStack {
-                                            Text("Tax")
-                                            Spacer()
-                                            Text(draft.taxAmount, format: .currency(code: draft.currency))
-                                        }
-                                        HStack {
-                                            Text("Total")
-                                                .font(.headline)
-                                            Spacer()
-                                            Text(draft.total, format: .currency(code: draft.currency))
-                                                .font(.headline)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Edit") {
-                                isShowingPreview = false
-                            }
-                        }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Save") {
-                                onSaved(draft)
-                                isShowingPreview = false
-                                dismiss()
-                            }
-                        }
-                    }
-                }
-            }
+    private func contentView(containerHeight: CGFloat) -> some View {
+        formContent(containerHeight: containerHeight)
+            .sheet(isPresented: $showClientPicker) { clientPickerSheet }
+            .sheet(isPresented: $showItemPicker) { itemPickerSheet }
+            .sheet(isPresented: $showDueDateSheet) { detailsSheet }
+            .sheet(isPresented: $showPaymentSheet) { paymentSheet }
+            .sheet(isPresented: $isShowingPreview) { previewSheet }
             .task { await loadClients() }
             .onAppear {
                 if draft.client == nil { showClientPicker = true }
             }
-            // Prefill from user defaults (terms not shown here; we map tax/dueDays/footerNotes)
-            .task {
-                if let d = try? await InvoiceDefaultsService.loadDefaults() {
-                    await MainActor.run {
-                        // Only apply if user hasn’t already changed them
-                        if draft.taxPercent == 0 { draft.taxPercent = d.taxRate }
-                        if !didUserChangeDueDate {
-                            if let newDue = Calendar.current.date(byAdding: .day, value: d.dueDays, to: Date()) {
-                                draft.dueDate = newDue
+            .task { await loadDefaults() }
+            .task { await loadInitialInvoiceNumber() }
+            .task { await refreshStripePaymentAvailability() }
+            .onChange(of: draft.paymentMethod) { _, newMethod in
+                if newMethod == .none {
+                    draft.paymentDetails = ""
+                    draft.paymentAddress = ""
+                }
+                if !newMethod.requiresDetails && newMethod != .none {
+                    draft.paymentDetails = ""
+                }
+                if !newMethod.requiresAddress && newMethod != .none {
+                    draft.paymentAddress = ""
+                }
+            }
+    }
+
+    private func formContent(containerHeight: CGFloat) -> some View {
+        Form {
+            Section {
+                TopInvoiceCard(
+                    selectedClient: draft.client,
+                    lockClient: lockClient,
+                    isLoading: isLoadingClients,
+                    onTapClient: { showClientPicker = true },
+                    date: draft.dueDate,
+                    invoiceNumber: draft.number,
+                    taxPercent: draft.taxPercent,
+                    taxAmount: draft.taxAmount,
+                    onTapDetails: { showDueDateSheet = true },
+                    noteText: draft.notes,
+                    onTapNotes: { showDueDateSheet = true },
+                    paymentText: draft.paymentInfo?.displayLine,
+                    onTapPayment: { showPaymentSheet = true }
+                )
+                .listRowBackground(Color.clear)
+            } header: {
+                Text("Invoice")
+            }
+
+            Section {
+                ItemsGroupCard(
+                    items: $draft.items,
+                    expandedItemIDs: $expandedItemIDs,
+                    onAddTap: {
+                        itemVM.title = ""
+                        itemVM.description = ""
+                        itemVM.quantity = 1
+                        itemVM.unitPrice = 0
+                        showItemPicker = true
+                    }
+                )
+                .listRowBackground(Color.clear)
+            } header: {
+                Text("Items")
+            }
+
+            Section {
+                TotalsCard(
+                    subTotal: draft.subTotal,
+                    taxAmount: draft.taxAmount,
+                    total: draft.total,
+                    currencyCode: draft.currency
+                )
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear
+                            .preference(key: ViewYPreferenceKey.self,
+                                        value: proxy.frame(in: .named("formScroll")).minY)
+                    }
+                )
+                .listRowInsets(EdgeInsets(top: UI.rowV, leading: UI.rowH, bottom: UI.rowV, trailing: UI.rowH))
+                .listRowBackground(Color.clear)
+            } header: {
+                Text("Totals")
+            }
+
+            if let error {
+                Section { Text(error).foregroundStyle(.red) }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemBackground).ignoresSafeArea())
+        .listStyle(.plain)
+        .navigationTitle("New Invoice")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Preview") {
+                    Task { await generatePreviewPDF() }
+                }
+                .disabled(!canSave)
+            }
+        }
+        .tint(themeColor)
+        .animation(.easeInOut(duration: 0.25), value: themeColor)
+        .coordinateSpace(name: "formScroll")
+        .listRowSpacing(UI.rowV)
+        .safeAreaInset(edge: .bottom) { stickyTotalFooter }
+        .onPreferenceChange(ViewYPreferenceKey.self) { totalsTopY in
+            updateFooterOpacity(totalsTopY: totalsTopY, containerHeight: containerHeight)
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
+                .onEnded { value in
+                    let dx = abs(value.translation.width)
+                    let dy = abs(value.translation.height)
+                    if max(dx, dy) > 24, !expandedItemIDs.isEmpty {
+                        expandedItemIDs.removeAll()
+                    }
+                }
+        )
+    }
+
+    private var stickyTotalFooter: some View {
+        HStack {
+            Text("Total")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.primary)
+            Spacer()
+            Text(currency(draft.total, code: draft.currency))
+                .font(.headline.weight(.semibold))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.25))
+        )
+        .shadow(color: .black.opacity(0.15), radius: 12, y: 2)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+        .opacity(footerOpacity)
+        .allowsHitTesting(footerOpacity > 0.05)
+        .animation(.easeInOut(duration: 0.20), value: footerOpacity)
+    }
+
+    private var clientPickerSheet: some View {
+        ClientPickerSheet(
+            clients: clients,
+            isLoading: isLoadingClients,
+            searchText: $clientSearch,
+            onCancel: { showClientPicker = false },
+            onSelect: { selected in
+                draft.client = selected
+                showClientPicker = false
+                showItemPicker = true
+            },
+            onCreateNew: {
+                showNewClientSheet = true
+            }
+        )
+        .presentationDetents([.large])
+        .presentationCornerRadius(28)
+        .presentationBackground(.ultraThinMaterial)
+        .presentationDragIndicator(.visible)
+        .sheet(isPresented: $showNewClientSheet) {
+            NavigationStack {
+                NewClientView {
+                    showNewClientSheet = false
+                    Task { await loadClients() }
+                }
+            }
+        }
+    }
+
+    private var itemPickerSheet: some View {
+        ItemPickerSheet(
+            viewModel: itemVM,
+            currentItemIndex: draft.items.count + 1,
+            presets: ["Service call", "Labor hour", "Materials", "Cleanup"],
+            onAdd: { newItem in
+                var item = newItem
+                let trimmedTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmedDesc = item.description.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmedDesc.isEmpty, !trimmedTitle.isEmpty {
+                    item.description = trimmedTitle
+                }
+
+                draft.items.append(item)
+                showItemPicker = false
+            },
+            onClose: { showItemPicker = false }
+        )
+        .presentationDetents([.large])
+        .presentationCornerRadius(28)
+        .presentationBackground(.ultraThinMaterial)
+        .presentationDragIndicator(.visible)
+    }
+
+    private var detailsSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    DatePicker("Due date", selection: $draft.dueDate, displayedComponents: .date)
+                    TextField("Invoice #", text: $draft.number)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+                    HStack {
+                        Text("Tax %")
+                        Spacer()
+                        TextField("0", value: $draft.taxPercent, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                }
+                Section {
+                    TextField("Notes", text: $draft.notes, axis: .vertical)
+                        .lineLimit(3...6)
+                }
+            }
+            .navigationTitle("Invoice details")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showDueDateSheet = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showDueDateSheet = false }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+        .onChange(of: draft.dueDate) { _, _ in
+            didUserChangeDueDate = true
+        }
+    }
+
+    private var paymentSheet: some View {
+        PaymentMethodEditorSheet(
+            method: $draft.paymentMethod,
+            details: $draft.paymentDetails,
+            mailingAddress: $draft.paymentAddress,
+            methods: paymentMethodOptions
+        )
+    }
+
+    private var previewSheet: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if let data = pdfData {
+                    DraftPDFKitView(data: data)
+                        .ignoresSafeArea()
+                } else {
+                    VStack(spacing: 20) {
+                        Text("Invoice Preview")
+                            .font(.title2.bold())
+                            .padding(.top)
+
+                        if isGeneratingPDF {
+                            ProgressView("Generating PDF…")
+                                .padding()
+                        }
+
+                        List {
+                            Section("Client") {
+                                if let client = draft.client {
+                                    Text(client.name)
+                                    if let email = client.email, !email.isEmpty {
+                                        Text(email).foregroundStyle(.secondary)
+                                    }
+                                } else {
+                                    Text("No client selected").foregroundStyle(.secondary)
+                                }
+                            }
+
+                            Section("Details") {
+                                Text("Invoice #: \(draft.number.isEmpty ? "—" : draft.number)")
+                                Text("Due: \(draft.dueDate.formatted(date: .abbreviated, time: .omitted))")
+                                Text("Tax: \(draft.taxPercent, format: .number)\u{202F}%")
+                                if let payment = draft.paymentInfo, payment.method != .none {
+                                    Text("Payment: \(payment.displayLine)")
+                                }
+                            }
+
+                            Section("Items") {
+                                if draft.items.isEmpty {
+                                    Text("No items").foregroundStyle(.secondary)
+                                } else {
+                                    ForEach(Array(draft.items.enumerated()), id: \.element.id) { index, item in
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(item.title.isEmpty ? "Item \(index + 1)" : item.title)
+                                                .font(.headline)
+                                            if !item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                                Text(item.description)
+                                                    .font(.subheadline)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            HStack {
+                                                Text("Qty: \(item.quantity)")
+                                                Spacer()
+                                                Text(item.unitPrice, format: .currency(code: draft.currency))
+                                            }
+                                            .font(.footnote)
+                                        }
+                                        .padding(.vertical, 4)
+                                    }
+                                }
+                            }
+
+                            Section("Totals") {
+                                HStack {
+                                    Text("Subtotal")
+                                    Spacer()
+                                    Text(draft.subTotal, format: .currency(code: draft.currency))
+                                }
+                                HStack {
+                                    Text("Tax")
+                                    Spacer()
+                                    Text(draft.taxAmount, format: .currency(code: draft.currency))
+                                }
+                                HStack {
+                                    Text("Total")
+                                        .font(.headline)
+                                    Spacer()
+                                    Text(draft.total, format: .currency(code: draft.currency))
+                                        .font(.headline)
+                                }
                             }
                         }
                     }
                 }
             }
-            // Prefill a friendly invoice number (editable)
-            .task {
-                if draft.number.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    if let next = try? await InvoiceService.nextInvoiceNumber() {
-                        await MainActor.run { draft.number = next }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Edit") {
+                        isShowingPreview = false
                     }
                 }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSaved(draft)
+                        isShowingPreview = false
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private func updateFooterOpacity(totalsTopY: CGFloat, containerHeight: CGFloat) {
+        let footerHeight: CGFloat = 64
+        let footerBottomPadding: CGFloat = 8
+        let contactY = containerHeight - footerHeight - footerBottomPadding
+        let fadeLead: CGFloat = 190
+        let fadeRange: CGFloat = 160
+        let distance = totalsTopY - (contactY + fadeLead)
+        let clamped = max(0, min(1, distance / fadeRange))
+        footerOpacity = Double(clamped)
+        totalsOnScreen = distance <= fadeRange
+    }
+
+    private func loadDefaults() async {
+        if let d = try? await InvoiceDefaultsService.loadDefaults() {
+            await MainActor.run {
+                if draft.taxPercent == 0 { draft.taxPercent = d.taxRate }
+                if !didUserChangeDueDate,
+                   let newDue = Calendar.current.date(byAdding: .day, value: d.dueDays, to: Date()) {
+                    draft.dueDate = newDue
+                }
+            }
+        }
+    }
+
+    private func loadInitialInvoiceNumber() async {
+        if draft.number.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let next = try? await InvoiceService.nextInvoiceNumber() {
+            await MainActor.run { draft.number = next }
+        }
+    }
+
+    private func refreshStripePaymentAvailability() async {
+        let status = await IA_fetchStripeStatus()
+        await MainActor.run {
+            stripeConnectedForPaymentMethod = (status?.connected == true)
+            if !stripeConnectedForPaymentMethod, draft.paymentMethod == .stripe {
+                draft.paymentMethod = .none
+            } else if stripeConnectedForPaymentMethod, draft.paymentMethod == .none {
+                draft.paymentMethod = .stripe
             }
         }
     }
@@ -1234,6 +1304,158 @@ private struct NotesRow: View {
         .buttonStyle(.plain)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityLabel(Text(noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Notes. Add a note." : "Notes. \(preview)"))
+    }
+}
+
+private struct PaymentMethodRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let paymentText: String?
+    var onTap: () -> Void
+
+    private var preview: String {
+        let value = paymentText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? "Select a method" : value
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8).fill(Color.green)
+                    Image(systemName: "dollarsign")
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 32, height: 32)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Payment")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text(preview)
+                        .font(.headline)
+                        .foregroundStyle((paymentText ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .tertiary : .primary)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.black.opacity(colorScheme == .light ? 0.16 : 0.35))
+            )
+        }
+        .buttonStyle(.plain)
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityLabel(Text((paymentText ?? "").isEmpty ? "Payment method. Select a method." : "Payment method. \(preview)"))
+    }
+}
+
+private struct PaymentMethodSelectorRow: View {
+    let methods: [InvoicePaymentMethod]
+    @Binding var selected: InvoicePaymentMethod
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(methods) { method in
+                    Button {
+                        selected = method
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: selected == method ? "largecircle.fill.circle" : "circle")
+                            Text(method.title)
+                                .lineLimit(1)
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(
+                            Capsule()
+                                .fill(chipColor(for: method, selected: selected == method))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(method.title))
+                    .accessibilityAddTraits(selected == method ? [.isSelected] : [])
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func chipColor(for method: InvoicePaymentMethod, selected: Bool) -> Color {
+        let base: Color
+        switch method {
+        case .zelle:
+            base = Color.purple
+        case .check:
+            base = Color.blue
+        case .stripe:
+            base = Color.indigo
+        case .none:
+            base = Color.gray
+        default:
+            base = Color.teal
+        }
+        return selected ? base.opacity(0.28) : base.opacity(0.12)
+    }
+}
+
+private struct PaymentMethodEditorSheet: View {
+    @Binding var method: InvoicePaymentMethod
+    @Binding var details: String
+    @Binding var mailingAddress: String
+    let methods: [InvoicePaymentMethod]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Choose payment method") {
+                    PaymentMethodSelectorRow(methods: methods, selected: $method)
+                }
+
+                if method.requiresDetails {
+                    Section(method == .zelle ? "Zelle details" : "Details") {
+                        TextField(method.detailsPlaceholder, text: $details, axis: .vertical)
+                            .lineLimit(1...3)
+                    }
+                }
+
+                if method.requiresAddress {
+                    Section("Mailing address for checks") {
+                        TextField("Enter full mailing address", text: $mailingAddress, axis: .vertical)
+                            .lineLimit(2...5)
+                        Text("This address will be printed in the invoice payment details.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if method == .stripe {
+                    Section {
+                        Text("A Stripe payment link will be attached when you send this invoice.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Payment Method")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }
 
@@ -2071,6 +2293,8 @@ private struct TopInvoiceCard: View {
 
     let noteText: String
     var onTapNotes: () -> Void
+    let paymentText: String?
+    var onTapPayment: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
@@ -2094,6 +2318,9 @@ private struct TopInvoiceCard: View {
 
             // Notes preview row (tapping opens details sheet to edit notes)
             NotesRow(noteText: noteText, onTap: onTapNotes)
+
+            // Payment method row (tapping opens details sheet to edit payment option)
+            PaymentMethodRow(paymentText: paymentText, onTap: onTapPayment)
         }
     }
 }

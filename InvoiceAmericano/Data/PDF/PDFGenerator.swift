@@ -464,23 +464,32 @@ enum PDFGenerator {
                  font: .boldSystemFont(ofSize: 13), align: .right, width: totalsValueW)
             y += 24
 
-            // ===== Temporary payment details (local, for now) =====
-            let paymentLabelFont = UIFont.boldSystemFont(ofSize: 12)
-            let paymentBodyFont  = UIFont.systemFont(ofSize: 11)
+            if let payment = snapshot.payment {
+                let lines = payment.pdfLines.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                if !lines.isEmpty {
+                    let paymentLabelFont = UIFont.boldSystemFont(ofSize: 12)
+                    let paymentBodyFont  = UIFont.systemFont(ofSize: 11)
 
-            draw(
-                "Payment Details:",
-                at: CGPoint(x: leftX, y: y),
-                font: paymentLabelFont
-            )
-            y += 14
+                    draw(
+                        "Payment Details:",
+                        at: CGPoint(x: leftX, y: y),
+                        font: paymentLabelFont
+                    )
+                    y += 14
 
-            draw(
-                "Zelle: sergreyes25@gmail.com",
-                at: CGPoint(x: leftX, y: y),
-                font: paymentBodyFont
-            )
-            y += 20
+                    for line in lines {
+                        draw(
+                            line,
+                            at: CGPoint(x: leftX, y: y),
+                            font: paymentBodyFont,
+                            align: .left,
+                            width: pageW - inset * 2
+                        )
+                        y += max(14, textHeight(line, font: paymentBodyFont, width: pageW - inset * 2) + 2)
+                    }
+                    y += 6
+                }
+            }
 
             // ===== Important invoice note (from invoice `notes`) =====
             if let note = snapshot.notes?.trimmedNonEmpty {

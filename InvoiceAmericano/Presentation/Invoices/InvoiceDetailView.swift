@@ -543,17 +543,19 @@ struct InvoiceDetailView: View {
     }
 
     private func sendTapped() {
-        // Always allow sending.
-        // Only show the disclaimer when Stripe is connected (because only then we attach a payment link),
-        // and only if the user hasn't opted out.
+        // Only offer Stripe disclaimer when this invoice will actually attach a Stripe payment link.
         Task {
-            if hideProcessingFeeDisclaimer {
+            let status = await IA_fetchStripeStatus()
+            let connected = (status?.connected == true)
+            let payment = InvoiceNotesCodec.extract(from: detail?.notes).payment
+            let shouldCreateStripeLink = connected && (payment == nil || payment?.method == .stripe)
+
+            if !shouldCreateStripeLink || hideProcessingFeeDisclaimer {
                 await send()
                 return
             }
 
-            let status = await IA_fetchStripeStatus()
-            if status?.connected == true {
+            if shouldCreateStripeLink {
                 await MainActor.run { showProcessingFeeDisclaimer = true }
             } else {
                 await send()
@@ -607,8 +609,15 @@ struct InvoiceDetailView: View {
 
     private func send() async {
         do {
-            // 1) Attempt to create/refresh checkout link (optional)
-            let payURL = try await InvoiceService.sendInvoice(id: invoiceId)
+            // 1) Decide whether this invoice should use Stripe checkout when sending.
+            guard let d = detail else { return }
+            let payment = InvoiceNotesCodec.extract(from: d.notes).payment
+            let shouldCreateStripeLink = stripeConnected && (payment == nil || payment?.method == .stripe)
+
+            // Legacy invoices (no payment metadata) keep existing behavior when Stripe is connected.
+            let payURL = shouldCreateStripeLink
+                ? (try await InvoiceService.sendInvoice(id: invoiceId))
+                : nil
             await MainActor.run {
                 if payURL != nil { self.didCreatePayLink = true }
             }
@@ -617,7 +626,6 @@ struct InvoiceDetailView: View {
             }
 
             // 2) Fresh PDF
-            guard let d = detail else { return }
             let pdfURL = try await PDFGenerator.makeInvoicePDF(detail: d)
 
             // 3) Verify PDF exists and has size > 0
