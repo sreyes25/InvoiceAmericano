@@ -13,6 +13,7 @@ import Auth
 struct InvoiceAmericanoApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var authVM = AuthViewModel()
     @State private var isAuthed = (AuthService.currentUserIDFast() != nil)
     @State private var showOnboarding = false
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
@@ -74,21 +75,30 @@ struct InvoiceAmericanoApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                
-                if isAuthed {
+                if authVM.isInRecoveryFlow {
+                    ResetPasswordView(vm: authVM)
+                } else if isAuthed {
                     if showOnboarding {
                         OnboardingFlow()
                     } else {
                         MainTabView()
                     }
                 } else {
-                    AuthView()
+                    AuthView(vm: authVM)
                 }
             }
             .animation(.snappy(duration: 0.25), value: isAuthed)   // smooth flip between auth states
+            .animation(.snappy(duration: 0.25), value: authVM.isInRecoveryFlow)
             .tint(.blue)                                           // global accent to match app theme
             // Handle email confirmation deep-link
             .onOpenURL { url in
+                let params = url.decodedQueryParameters
+                if url.hasRecoveryHint {
+                    authVM.beginRecoveryFlow(
+                        accessToken: params["access_token"],
+                        refreshToken: params["refresh_token"]
+                    )
+                }
                 Task {
                     await AuthService.handleDeepLink(url)
                     isAuthed = (AuthService.currentUserIDFast() != nil)

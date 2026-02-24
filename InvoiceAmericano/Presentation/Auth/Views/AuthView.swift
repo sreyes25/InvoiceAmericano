@@ -9,7 +9,7 @@ import SwiftUI
 import SceneKit
 
 struct AuthView: View {
-    @StateObject private var vm = AuthViewModel()
+    @ObservedObject var vm: AuthViewModel
     @State private var showPassword = false
 
     var body: some View {

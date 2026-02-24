@@ -42,6 +42,9 @@ final class AuthViewModel: ObservableObject {
     @Published var error: String?
     @Published var banner: String?
     @Published var isAuthed: Bool = false
+    @Published var isInRecoveryFlow: Bool = false
+    @Published var recoveryAccessToken: String?
+    @Published var recoveryRefreshToken: String?
 
     private var hasEditedEmail = false
     private var hasEditedPassword = false
@@ -126,6 +129,45 @@ final class AuthViewModel: ObservableObject {
             try await AuthService.signOut()
             self.isAuthed = false
             AnalyticsService.track(.authSignedOut)
+        }
+    }
+
+    func beginRecoveryFlow(accessToken: String?, refreshToken: String?) {
+        recoveryAccessToken = accessToken
+        recoveryRefreshToken = refreshToken
+        isInRecoveryFlow = true
+        error = nil
+        banner = nil
+    }
+
+    func clearRecoveryFlow() {
+        isInRecoveryFlow = false
+        recoveryAccessToken = nil
+        recoveryRefreshToken = nil
+    }
+
+    func updatePassword(newPassword: String) async {
+        let trimmed = newPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            error = "Enter a new password."
+            return
+        }
+
+        await run("Password update failed") { [self] in
+            let attrs = UserAttributes(password: trimmed)
+            _ = try await SupabaseManager.shared.client.auth.update(user: attrs)
+            self.banner = "Password updated successfully."
+        }
+    }
+
+    func completeRecoveryFlow() async {
+        clearRecoveryFlow()
+        goSignIn()
+        do {
+            try await AuthService.signOut()
+        } catch {
+            self.isAuthed = false
+            NotificationCenter.default.post(name: .authDidChange, object: nil)
         }
     }
 
