@@ -96,6 +96,8 @@ struct MainTabView: View {
                 Task { await NotificationService.setAppBadgeCount(n) }
             }
         }
+        .toolbarBackground(Color(.systemBackground), for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
 
     }
 }

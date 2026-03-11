@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct ClientListView: View {
+    @StateObject private var networkMonitor = NetworkMonitorService.shared
     @State private var clients: [ClientRow] = []
     @State private var isLoading = false
     @State private var error: String?
@@ -197,6 +198,9 @@ struct ClientListView: View {
             ScrollView {
                 VStack(spacing: 14) {
                     searchBar
+                    if !networkMonitor.isConnected {
+                        offlineBanner
+                    }
                     clientsSection
                 }
                 .padding(.horizontal, 16)
@@ -228,11 +232,36 @@ struct ClientListView: View {
                         Task { await load() }
                     }
                 }
+                .iaSheetNavigationChrome()
             }
+            .iaStandardSheetPresentation(detents: [.large])
             .task { await load() }
             .refreshable { await load() }
+            .onReceive(NotificationCenter.default.publisher(for: .offlineQueueDidSync)) { _ in
+                Task { await load() }
+            }
             .scrollIndicators(.hidden)
         }
+    }
+
+    private var offlineBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "wifi.slash")
+                .foregroundStyle(.orange)
+            Text("Offline mode: showing cached clients. New clients will sync automatically when you reconnect.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.orange.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.25))
+        )
     }
 
     private func load() async {

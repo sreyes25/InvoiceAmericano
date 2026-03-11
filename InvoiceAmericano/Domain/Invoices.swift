@@ -7,7 +7,7 @@
 import Foundation
 
 // Shape returned by the select with an embedded client object.
-struct InvoiceRow: Identifiable, Decodable {
+struct InvoiceRow: Identifiable, Codable {
     let id: UUID
     let number: String
     let status: String
@@ -31,7 +31,7 @@ struct InvoiceRow: Identifiable, Decodable {
     }
 }
 
-struct ClientRef: Decodable {
+struct ClientRef: Codable {
     let name: String?
     let colorHex: String?
 

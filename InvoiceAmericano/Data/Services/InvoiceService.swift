@@ -98,34 +98,64 @@ enum InvoiceService {
     static func fetchRecentInvoices(limit: Int = 5) async throws -> [InvoiceRow] {
         let client = SupabaseManager.shared.client
         let uid = try requireUID()
-        let rows: [InvoiceRow] = try await client
-            .from("invoices")
-            .select("""
-                id, number, status, total, currency, created_at, due_date, sent_at, checkout_url, pdf_saved_at, client_id,
-                client:clients!invoices_client_id_fkey(name)
-            """)
-            .eq("user_id", value: uid)
-            .order("created_at", ascending: false)
-            .limit(limit)
-            .execute()
-            .value
-        return rows
+        let pending = await OfflineWriteQueueService.shared.pendingInvoiceRows(uid: uid)
+        do {
+            let rows: [InvoiceRow] = try await client
+                .from("invoices")
+                .select("""
+                    id, number, status, total, currency, created_at, due_date, sent_at, checkout_url, pdf_saved_at, client_id,
+                    client:clients!invoices_client_id_fkey(name)
+                """)
+                .eq("user_id", value: uid)
+                .order("created_at", ascending: false)
+                .limit(limit)
+                .execute()
+                .value
+            let merged = mergePendingInvoices(remote: rows, pending: pending)
+            OfflineCacheService.saveRecentInvoices(merged, uid: uid)
+            return Array(merged.prefix(limit))
+        } catch {
+            if let cached = OfflineCacheService.loadRecentInvoices(uid: uid) {
+                let merged = mergePendingInvoices(remote: cached, pending: pending)
+                return Array(merged.prefix(limit))
+            }
+            throw error
+        }
     }
 
     static func fetchAccountStats() async throws -> AccountStats {
         let client = SupabaseManager.shared.client
         let uid = try requireUID()
+        let pending = await OfflineWriteQueueService.shared.pendingInvoiceRows(uid: uid)
 
         // Keep it simple and reliable: fetch status + total and compute in-app.
         // (We can replace with SQL aggregates later if needed.)
         struct Row: Decodable { let status: String; let total: Double? }
 
-        let rows: [Row] = try await client
-            .from("invoices")
-            .select("status,total")
-            .eq("user_id", value: uid)
-            .execute()
-            .value
+        let rows: [Row]
+        do {
+            rows = try await client
+                .from("invoices")
+                .select("status,total")
+                .eq("user_id", value: uid)
+                .execute()
+                .value
+        } catch {
+            if let cached = OfflineCacheService.loadInvoices(uid: uid) {
+                let merged = mergePendingInvoices(remote: cached, pending: pending)
+                let totalCount = merged.count
+                let paidCount = merged.filter { $0.status.lowercased() == "paid" }.count
+                let outstandingAmount = merged
+                    .filter { ["open","sent","overdue"].contains($0.status.lowercased()) }
+                    .reduce(0.0) { $0 + ($1.total ?? 0.0) }
+                return AccountStats(
+                    totalCount: totalCount,
+                    paidCount: paidCount,
+                    outstandingAmount: outstandingAmount
+                )
+            }
+            throw error
+        }
 
         let totalCount = rows.count
         let paidCount = rows.filter { $0.status.lowercased() == "paid" }.count
@@ -133,10 +163,16 @@ enum InvoiceService {
             .filter { ["open","sent","overdue"].contains($0.status.lowercased()) }
             .reduce(0.0) { $0 + ($1.total ?? 0.0) }
 
+        // Pending offline invoices should count in account stats too.
+        let pendingOpen = pending.filter { $0.status.lowercased() != "paid" }
+        let mergedOutstanding = outstandingAmount + pendingOpen.reduce(0.0) { $0 + ($1.total ?? 0.0) }
+        let mergedTotal = totalCount + pending.count
+        let mergedPaid = paidCount + pending.filter { $0.status.lowercased() == "paid" }.count
+
         return AccountStats(
-            totalCount: totalCount,
-            paidCount: paidCount,
-            outstandingAmount: outstandingAmount
+            totalCount: mergedTotal,
+            paidCount: mergedPaid,
+            outstandingAmount: mergedOutstanding
         )
     }
 
@@ -173,16 +209,26 @@ enum InvoiceService {
     static func fetchInvoices(status: InvoiceStatus) async throws -> [InvoiceRow] {
         let client = SupabaseManager.shared.client
         let uid = try requireUID()
+        let pending = await OfflineWriteQueueService.shared.pendingInvoiceRows(uid: uid)
 
-        let query = client
-            .from("invoices")
-            .select("id, number, status, total, created_at, due_date, sent_at, checkout_url, pdf_saved_at, client_id, client:clients!invoices_client_id_fkey(name, color_hex)")
-            .eq("user_id", value: uid)
-            .order("created_at", ascending: false)
+        do {
+            let query = client
+                .from("invoices")
+                .select("id, number, status, total, created_at, due_date, sent_at, checkout_url, pdf_saved_at, client_id, client:clients!invoices_client_id_fkey(name, color_hex)")
+                .eq("user_id", value: uid)
+                .order("created_at", ascending: false)
 
-        let rows: [InvoiceRow] = try await query.execute().value
-
-        return filterInvoices(rows, status: status)
+            let rows: [InvoiceRow] = try await query.execute().value
+            let merged = mergePendingInvoices(remote: rows, pending: pending)
+            OfflineCacheService.saveInvoices(merged, uid: uid)
+            return filterInvoices(merged, status: status)
+        } catch {
+            if let cached = OfflineCacheService.loadInvoices(uid: uid) {
+                let merged = mergePendingInvoices(remote: cached, pending: pending)
+                return filterInvoices(merged, status: status)
+            }
+            throw error
+        }
     }
 
     /// Applies the same filtering used on the invoice list screen, separated for testing.
@@ -221,8 +267,26 @@ enum InvoiceService {
 
     // Create an invoice + items, optionally trigger checkout
     static func createInvoice(from draft: InvoiceDraft) async throws -> (id: UUID, checkoutURL: URL?) {
-        let client = SupabaseManager.shared.client
         let uid = try requireUID()
+
+        if !NetworkMonitorService.isConnectedNow() {
+            let localID = try await OfflineWriteQueueService.shared.enqueueInvoiceCreate(uid: uid, draft: draft)
+            return (localID, nil)
+        }
+
+        do {
+            return try await createInvoiceOnline(from: draft, uid: uid)
+        } catch {
+            if OfflineWriteQueueService.shouldQueueForOffline(error) {
+                let localID = try await OfflineWriteQueueService.shared.enqueueInvoiceCreate(uid: uid, draft: draft)
+                return (localID, nil)
+            }
+            throw error
+        }
+    }
+
+    static func createInvoiceOnline(from draft: InvoiceDraft, uid: String) async throws -> (id: UUID, checkoutURL: URL?) {
+        let client = SupabaseManager.shared.client
 
         guard let clientId = draft.client?.id else {
             throw NSError(domain: "InvoiceService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing client on draft"])
@@ -241,16 +305,12 @@ enum InvoiceService {
         }
 
         // ---- 3) Compute issued_at and due_date (string) ----
-        // Always stamp today's issued date once here (UI can also show it)
         let ymd = DateFormatter()
         ymd.dateFormat = "yyyy-MM-dd"
         ymd.timeZone = .current
 
         let issuedAtDate = Date()
         let issuedAtStr = ymd.string(from: issuedAtDate)
-
-        // The draft currently provides a concrete dueDate; if you later make it optional,
-        // you can fallback to defaults?.dueDays here.
         let dueDateStr = ymd.string(from: draft.dueDate)
 
         // ---- 4) Notes + per-invoice payment metadata ----
@@ -259,7 +319,6 @@ enum InvoiceService {
             payment: draft.paymentInfo
         )
 
-        // Tax / Total logic...
         let effectiveSubtotal = draft.subTotal
         let taxPercent = max(0, draft.taxPercent)
         let effectiveTax: Double = taxPercent > 0
@@ -277,7 +336,7 @@ enum InvoiceService {
             total: effectiveTotal,
             currency: draft.currency.lowercased(),
             due_date: dueDateStr,
-            notes: effectiveNotes,              // 👈 use only the invoice note
+            notes: effectiveNotes,
             user_id: uid,
             issued_at: issuedAtStr
         )
@@ -306,10 +365,48 @@ enum InvoiceService {
         }
         _ = try await client.from("line_items").insert(itemsPayload).execute()
 
-        // ---- 8) Do NOT create a checkout link on invoice creation ----
-        // Checkout links are only created when the user explicitly taps “Send”.
-        // This prevents Open invoices from appearing as Sent just because a link exists.
         return (invoiceId, nil)
+    }
+
+    static func createInvoiceOnline(
+        from pending: PendingInvoiceCreate,
+        uid: String,
+        resolvedClientID: UUID
+    ) async throws -> (id: UUID, checkoutURL: URL?) {
+        let client = ClientRow(
+            id: resolvedClientID,
+            name: pending.clientName ?? "Client",
+            email: nil,
+            phone: nil,
+            address: nil,
+            city: nil,
+            state: nil,
+            zip: nil,
+            created_at: nil,
+            color_hex: pending.clientColorHex
+        )
+
+        let draft = InvoiceDraft(
+            number: pending.number,
+            client: client,
+            dueDate: pending.dueDate,
+            currency: pending.currency,
+            taxPercent: pending.taxPercent,
+            notes: pending.notes,
+            paymentMethod: pending.paymentMethod,
+            paymentDetails: pending.paymentDetails,
+            paymentAddress: pending.paymentAddress,
+            items: pending.items.map { item in
+                LineItemDraft(
+                    title: item.title,
+                    description: item.description,
+                    quantity: item.quantity,
+                    unitPrice: item.unitPrice
+                )
+            }
+        )
+
+        return try await createInvoiceOnline(from: draft, uid: uid)
     }
 
     /// Creates/refreshes checkout session, stamps sent_at, and tries to fetch checkout_url.
@@ -368,20 +465,28 @@ enum InvoiceService {
     static func fetchInvoiceDetail(id: UUID) async throws -> InvoiceDetail {
         let client = SupabaseManager.shared.client
         let uid = try requireUID()
-        let detail: InvoiceDetail = try await client
-            .from("invoices")
-            .select("""
-                id, number, status, subtotal, tax, total, notes, currency, created_at, issued_at, due_date, checkout_url, pdf_saved_at,
-                client:clients!invoices_client_id_fkey(name, color_hex),
-                line_items(id, title, description, qty, unit_price, amount)
-            """)
-            .eq("id", value: id.uuidString)
-            .eq("user_id", value: uid)
-            .limit(1)                  // <- extra safety with single()
-            .single()
-            .execute()
-            .value
-        return detail
+        do {
+            let detail: InvoiceDetail = try await client
+                .from("invoices")
+                .select("""
+                    id, number, status, subtotal, tax, total, notes, currency, created_at, issued_at, due_date, checkout_url, pdf_saved_at,
+                    client:clients!invoices_client_id_fkey(name, color_hex),
+                    line_items(id, title, description, qty, unit_price, amount)
+                """)
+                .eq("id", value: id.uuidString)
+                .eq("user_id", value: uid)
+                .limit(1)                  // <- extra safety with single()
+                .single()
+                .execute()
+                .value
+            OfflineCacheService.saveInvoiceDetail(detail, uid: uid)
+            return detail
+        } catch {
+            if let cached = OfflineCacheService.loadInvoiceDetail(id: id, uid: uid) {
+                return cached
+            }
+            throw error
+        }
     }
     
     // MARK: - Stamp PDF Saved
@@ -396,6 +501,12 @@ enum InvoiceService {
             .match(["id": id.uuidString])
             .eq("user_id", value: uid)
             .execute()
+    }
+
+    private static func mergePendingInvoices(remote: [InvoiceRow], pending: [InvoiceRow]) -> [InvoiceRow] {
+        guard !pending.isEmpty else { return remote }
+        let remoteIDs = Set(remote.map(\.id))
+        return pending.filter { !remoteIDs.contains($0.id) } + remote
     }
 }
 

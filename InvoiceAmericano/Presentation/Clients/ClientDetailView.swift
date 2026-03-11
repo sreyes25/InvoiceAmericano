@@ -95,7 +95,9 @@ struct ClientDetailView: View {
                     showEdit = false
                 }
             }
+            .iaSheetNavigationChrome()
         }
+        .iaStandardSheetPresentation(detents: [.large])
         .task { await loadInvoices() }
     }
 

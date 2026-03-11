@@ -335,24 +335,24 @@ struct AccountView: View {
                 let ready = (s.details_submitted == true && s.charges_enabled == true && s.payouts_enabled == true)
                 return ready ? "Ready: charges & payouts enabled" : "Connected — finish verification to enable payouts"
             } else {
-                return "Accept payments from your invoices"
+                return "Optional: connect when you want to accept card payments"
             }
         }
-        return "Accept payments from your invoices"
+        return "Optional: connect when you want to accept card payments"
     }
     private var stripeStateLabel: String {
         if let s = stripeStatus {
-            if !s.connected { return "Not connected" }
+            if !s.connected { return "Available" }
             let ready = (s.details_submitted == true && s.charges_enabled == true && s.payouts_enabled == true)
-            return ready ? "Active" : "Needs setup"
+            return ready ? "Active" : "Optional"
         }
         return "Checking…"
     }
     private var stripeStateColor: Color {
         if let s = stripeStatus {
-            if !s.connected { return .red }
+            if !s.connected { return .blue }
             let ready = (s.details_submitted == true && s.charges_enabled == true && s.payouts_enabled == true)
-            return ready ? .green : .orange
+            return ready ? .green : .blue
         }
         return .secondary
     }
@@ -903,7 +903,9 @@ struct AccountDetailsView: View {
                     }
                 }
             }
+            .iaSheetNavigationChrome()
         }
+        .iaStandardSheetPresentation(detents: [.medium, .large])
     }
 
     // MARK: - Helpers

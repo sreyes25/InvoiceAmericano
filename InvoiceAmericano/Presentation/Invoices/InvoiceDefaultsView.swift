@@ -11,7 +11,7 @@ struct InvoiceDefaultsView: View {
     @State private var taxRate: String = "0"           // as string for TextField
     @State private var dueDays: String = "30"          // e.g., Net 30
     @State private var terms: String = "Net 30"
-    @State private var footerNotes: String = "Thank you for your business!"
+    @State private var footerNotes: String = ""
 
     @State private var isSaving = false
     @State private var errorText: String?
@@ -79,7 +79,7 @@ struct InvoiceDefaultsView: View {
                             Text("Footer Notes")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
-                            TextField("Thanks for your business!", text: $footerNotes, axis: .vertical)
+                            TextField("Please include the invoice number with your payment.", text: $footerNotes, axis: .vertical)
                                 .lineLimit(3...6)
                         }
                     }
@@ -123,7 +123,7 @@ struct InvoiceDefaultsView: View {
                 .disabled(isSaving)
 
                 // Small helper text
-                Text("These defaults apply to new invoices. You can always edit per-invoice.")
+                Text("Keep footer short and clear for customers.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

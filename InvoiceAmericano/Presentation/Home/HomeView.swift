@@ -71,7 +71,7 @@ struct HomeView: View {
 
     private var stripeSectionStatus: String {
         if stripeStatus == nil { return "Checking…" }
-        return stripeFullyReady ? "Active" : "Action needed"
+        return stripeFullyReady ? "Active" : "Connect"
     }
 
     // Sheets
@@ -153,15 +153,17 @@ struct HomeView: View {
                 })
                 .navigationTitle("New Invoice")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+                .iaSheetNavigationChrome()
             }
         }
+        .iaStandardSheetPresentation(detents: [.large])
 
         .sheet(item: $payLinkPayload) { payload in
             ActivitySheet(items: ["Pay this invoice", payload.url]) { _, _ in
                 payLinkPayload = nil
             }
         }
+        .iaStandardSheetPresentation(detents: [.medium, .large], background: .system)
         
         // Recent Invoices sheet
         .sheet(isPresented: $showInvoicesSheet) {
@@ -179,7 +181,7 @@ struct HomeView: View {
                 )
                 .background(Color(.systemBackground).ignoresSafeArea())
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+                .iaSheetNavigationChrome()
                 .navigationTitle("Recent Invoices")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -187,10 +189,7 @@ struct HomeView: View {
                     }
                 }
             }
-            .presentationDetents([.fraction(0.92), .large])
-            .presentationCornerRadius(28)
-            .presentationDragIndicator(.visible)
-            .presentationBackground(.clear)
+            .iaStandardSheetPresentation(detents: [.fraction(0.92), .large])
             .scrollDismissesKeyboard(.immediately)
         }
 
@@ -211,7 +210,7 @@ struct HomeView: View {
                 )
                 .background(Color(.systemBackground).ignoresSafeArea())
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+                .iaSheetNavigationChrome()
                 .navigationTitle("Recent Activity")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -219,10 +218,7 @@ struct HomeView: View {
                     }
                 }
             }
-            .presentationDetents([.fraction(0.92), .large])
-            .presentationCornerRadius(28)
-            .presentationDragIndicator(.visible)
-            .presentationBackground(.clear)
+            .iaStandardSheetPresentation(detents: [.fraction(0.92), .large])
             .scrollDismissesKeyboard(.immediately)
         }
 
@@ -276,54 +272,10 @@ struct HomeView: View {
                     .foregroundStyle(
                         stripeStatus == nil
                             ? AnyShapeStyle(.secondary)
-                            : AnyShapeStyle(stripeFullyReady ? Color.green : Color.orange)
+                            : AnyShapeStyle(stripeFullyReady ? Color.green : Color.blue)
                     )
             }
             .padding(.horizontal)
-
-            // --- Status card ---
-            // Show the status/onboarding card unless the account is fully ready
-            if stripeStatus == nil || !stripeFullyReady {
-                Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    Task { await onStripePrimaryTap() }
-                } label: {
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill((stripeFullyReady ? Color.green : Color.orange).opacity(0.15))
-                                .frame(width: 32, height: 32)
-                            Image(systemName: stripeFullyReady ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(stripeFullyReady ? .green : .orange)
-                        }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(stripeFullyReady ? "Stripe Connected" : "Connect with Stripe")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                            Text(stripeStatusText())
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Color(.secondarySystemBackground))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(Color.black.opacity(0.06))
-                    )
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal)
-            }
 
             // --- Primary action button under the card ---
             Button {
@@ -368,26 +320,6 @@ struct HomeView: View {
         }
         .padding(.top, 2)
         .onAppear { Task { await refreshStripe() } }
-    }
-
-    private func stripeStatusText() -> String {
-        // If we don't have a status yet, show the generic connect prompt
-        guard let s = stripeStatus else {
-            return "Connect to accept payments from your invoices."
-        }
-        // Not connected yet
-        guard s.connected == true else {
-            return "Connect to accept payments from your invoices."
-        }
-        // Fully ready
-        if stripeFullyReady { return "Ready: charges & payouts enabled" }
-        // Connected but still needs steps
-        var parts: [String] = []
-        if s.details_submitted != true { parts.append("finish verification") }
-        if s.charges_enabled != true { parts.append("enable charges") }
-        if s.payouts_enabled != true { parts.append("enable payouts") }
-        if parts.isEmpty { return "Finalizing Stripe setup…" }
-        return "Connected — " + parts.joined(separator: " • ") + "."
     }
 
     private var stripePrimaryTitle: String {
@@ -1798,7 +1730,7 @@ private struct AIAssistantComingSoonSheet: View {
             .frame(maxWidth: .infinity)
             .padding(.horizontal)
         }
-        // Allow the sheet to grow and be scrolled to full height
+        // Keep original AI sheet personality from Quick Actions
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .presentationContentInteraction(.scrolls)

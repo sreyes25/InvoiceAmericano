@@ -129,11 +129,13 @@ struct InvoiceAmericanoApp: App {
             .onChange(of: scenePhase) {
                 if scenePhase == .active {
                     didSyncUnreadThisActive = false
+                    _ = NetworkMonitorService.shared
                     isAuthed = (AuthService.currentUserIDFast() != nil)
                     if isAuthed {
                         Task { await recomputeOnboardingFlag() }
                         Task { await RealtimeService.start() }
                         Task { await syncUnreadAndBadgeIfNeeded() }
+                        Task { await OfflineWriteQueueService.shared.flushPendingWrites() }
                     }
                 } else if scenePhase == .background || scenePhase == .inactive {
                     didSyncUnreadThisActive = false
@@ -141,11 +143,13 @@ struct InvoiceAmericanoApp: App {
             }
             .task {
                 AnalyticsService.track(.appLaunch)
+                _ = NetworkMonitorService.shared
                 if isAuthed {
                     await recomputeOnboardingFlag()
                     await NotificationService.syncDeviceTokenIfNeeded()
                     await RealtimeService.start()
                     await syncUnreadAndBadgeIfNeeded()
+                    await OfflineWriteQueueService.shared.flushPendingWrites()
                 }
             }
             .overlay(alignment: .top) {

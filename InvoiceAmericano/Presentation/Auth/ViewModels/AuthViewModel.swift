@@ -56,10 +56,19 @@ final class AuthViewModel: ObservableObject {
 
     // MARK: - Derived
     var canSubmitSignUp: Bool {
-        email.isPlausibleEmail && strength != .weak && !isLoading
+        normalizedEmail.isPlausibleEmail && strength != .weak && !isLoading
     }
     var canSubmitSignIn: Bool {
-        email.isPlausibleEmail && !password.isEmpty && !isLoading
+        normalizedEmail.isPlausibleEmail && !password.isEmpty && !isLoading
+    }
+
+    private var normalizedEmail: String {
+        email
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: "\t", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 
     // MARK: - Public API
@@ -85,7 +94,7 @@ final class AuthViewModel: ObservableObject {
         AnalyticsService.track(.authSignUpStarted, metadata: ["method": "password"])
 
         await run("Sign up failed") { [self] in
-            try await AuthService.signUp(email: self.email, password: self.password)
+            try await AuthService.signUp(email: self.normalizedEmail, password: self.password)
             self.banner = "Check your email to confirm your account."
             NotificationCenter.default.post(name: .authDidChange, object: nil)
             AnalyticsService.track(.authSignUpSucceeded, metadata: ["method": "password"])
@@ -101,7 +110,7 @@ final class AuthViewModel: ObservableObject {
         AnalyticsService.track(.authSignInStarted, metadata: ["method": "password"])
 
         await run("Sign in failed") { [self] in
-            try await AuthService.signIn(email: self.email, password: self.password)
+            try await AuthService.signIn(email: self.normalizedEmail, password: self.password)
             // Broadcast and refresh local auth state
             NotificationCenter.default.post(name: .authDidChange, object: nil)
             self.refreshAuthNow()
@@ -191,9 +200,9 @@ final class AuthViewModel: ObservableObject {
         case .signUp:
             // Show inline hints only when user has interacted or tried to submit
             let show = attemptedSubmit || hasEditedEmail
-            emailHint = email.isEmpty
+            emailHint = normalizedEmail.isEmpty
                 ? (show ? "Email required" : nil)
-                : (email.isPlausibleEmail ? nil : (show ? "Enter a valid email" : nil))
+                : (normalizedEmail.isPlausibleEmail ? nil : (show ? "Enter a valid email" : nil))
 
             let showPwd = attemptedSubmit || hasEditedPassword
             passwordHint = password.isEmpty
@@ -203,7 +212,7 @@ final class AuthViewModel: ObservableObject {
         case .signIn:
             // Keep it simple; only surface hints if fields are empty on submit
             let show = attemptedSubmit
-            emailHint = email.isEmpty ? (show ? "Email required" : nil) : nil
+            emailHint = normalizedEmail.isEmpty ? (show ? "Email required" : nil) : nil
             passwordHint = password.isEmpty ? (show ? "Password required" : nil) : nil
 
         case .chooser:
@@ -263,8 +272,16 @@ final class AuthViewModel: ObservableObject {
 
     private func mapErrorMessage(default msg: String, _ err: Error) -> String {
         let t = (err as NSError).localizedDescription.lowercased()
+        if t.contains("invalid format") || t.contains("unable to validate email address") {
+            return "That email format is invalid. Remove spaces and use a full email like name@domain.com."
+        }
+        if t.contains("unsupported email") {
+            return "This email/domain is blocked by your Supabase auth settings."
+        }
         if t.contains("invalid login") || t.contains("invalid credentials") { return "Email or password is incorrect." }
-        if t.contains("email rate limit") || t.contains("too many") { return "Too many attempts — try again in a minute." }
+        if t.contains("email rate limit") || t.contains("too many requests") || t.contains("too many attempts") || t.contains("rate limit") {
+            return "Too many attempts — try again in a minute."
+        }
         if t.contains("user already registered") || t.contains("already exists") { return "That email is already registered." }
         if t.contains("password") && t.contains("weak") { return "Password is too weak. Try a longer one with numbers & symbols." }
         if t.contains("email not confirmed") { return "Please confirm your email, then sign in." }

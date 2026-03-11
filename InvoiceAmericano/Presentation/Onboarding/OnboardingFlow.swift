@@ -18,6 +18,17 @@ struct SafariView: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: SFSafariViewController, context: Context) {}
 }
 
+private struct OnboardingProfileRow: Decodable {
+    let display_name: String?
+}
+
+private struct OnboardingBrandingRow: Decodable {
+    let business_name: String?
+    let tagline: String?
+    let accent_hex: String?
+    let logo_public_url: String?
+}
+
 // MARK: - Coordinator
 
 struct OnboardingFlow: View {
@@ -31,6 +42,7 @@ struct OnboardingFlow: View {
     // Collected state across steps
     @State private var businessName: String = ""
     @State private var tagline: String = ""
+    @State private var industry: String = "General Business"
 
     // NEW: Branding personalization
     @State private var accentColor: Color = .accentColor
@@ -41,7 +53,9 @@ struct OnboardingFlow: View {
     @State private var defaultTaxPct: String = "0"
     @State private var defaultNotes: String = ""
 
+    @State private var notificationsEnabled: Bool = true
     @State private var stripeConnected: Bool = false
+    @State private var existingLogoPublicURL: String?
 
     enum Step: Hashable {
         case welcome
@@ -65,13 +79,23 @@ struct OnboardingFlow: View {
                         VStack(alignment: .leading, spacing: 14) {
                             Text(title(for: step))
                                 .font(.title2.bold())
+                            if step != .welcome {
+                                Button {
+                                    withAnimation(.snappy(duration: 0.25)) { step = previousStep(from: step) }
+                                } label: {
+                                    Label("Back", systemImage: "chevron.left")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
 
                             switch step {
                             case .welcome:
                                 WelcomeStep { withAnimation(.snappy(duration: 0.25)) { step = .notifications } }
 
                             case .notifications:
-                                NotificationsStep {
+                                NotificationsStep { enabled in
+                                    notificationsEnabled = enabled
                                     withAnimation(.snappy(duration: 0.25)) { step = .branding }
                                 }
 
@@ -79,6 +103,7 @@ struct OnboardingFlow: View {
                                 BrandingStep(
                                     businessName: $businessName,
                                     tagline: $tagline,
+                                    industry: $industry,
                                     accentColor: $accentColor,
                                     logoPickerItem: $logoPickerItem,
                                     logoUIImage: $logoUIImage,
@@ -88,7 +113,6 @@ struct OnboardingFlow: View {
                             case .invoiceDefaults:
                                 InvoiceDefaultsStep(
                                     terms: $defaultTerms,
-                                    taxPct: $defaultTaxPct,
                                     notes: $defaultNotes,
                                     onNext: { withAnimation(.snappy(duration: 0.25)) { step = .stripeConnect } }
                                 )
@@ -127,6 +151,7 @@ struct OnboardingFlow: View {
                 stripeConnected = true
                 if step == .stripeConnect { step = .done }
             }
+            .task { await preloadExistingData() }
         }
         .overlay(alignment: .bottom) {
             if let err = errorText {
@@ -165,6 +190,73 @@ struct OnboardingFlow: View {
         }
     }
 
+    private func previousStep(from current: Step) -> Step {
+        switch current {
+        case .welcome: return .welcome
+        case .notifications: return .welcome
+        case .branding: return .notifications
+        case .invoiceDefaults: return .branding
+        case .stripeConnect: return .invoiceDefaults
+        case .done: return .stripeConnect
+        }
+    }
+
+    private func preloadExistingData() async {
+        let client = SupabaseManager.shared.client
+        do {
+            let uid = try SupabaseManager.shared.requireCurrentUserIDString()
+
+            let profile: OnboardingProfileRow = try await client
+                .from("profiles")
+                .select("display_name")
+                .eq("id", value: uid)
+                .single()
+                .execute()
+                .value
+
+            let brandingRows: [OnboardingBrandingRow] = try await client
+                .from("branding_settings")
+                .select("business_name,tagline,accent_hex,logo_public_url")
+                .eq("user_id", value: uid)
+                .limit(1)
+                .execute()
+                .value
+
+            let notifications = await ProfileService.loadNotificationsEnabled()
+            let defaults = try? await InvoiceDefaultsService.loadDefaults()
+            let branding = brandingRows.first
+
+            let profileName = profile.display_name?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let brandingName = branding?.business_name?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            await MainActor.run {
+                notificationsEnabled = notifications
+
+                if let name = profileName, !name.isEmpty {
+                    businessName = name
+                } else if let name = brandingName, !name.isEmpty {
+                    businessName = name
+                }
+
+                if let tag = branding?.tagline { tagline = tag }
+                if let accentHex = branding?.accent_hex, let parsed = Color(hex: accentHex) {
+                    accentColor = parsed
+                }
+                existingLogoPublicURL = branding?.logo_public_url
+
+                if let defaults {
+                    defaultTerms = defaults.terms ?? defaultTerms
+                    defaultTaxPct = String(defaults.taxRate)
+                    if let footer = defaults.footerNotes, !footer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        defaultNotes = footer
+                    }
+                }
+            }
+        } catch {
+            // Failing to preload should not block onboarding.
+        }
+    }
+
     // MARK: - Persist everything (DBA + defaults)
     private func persistAllAndClose() async {
         guard !isSaving else { return }
@@ -186,7 +278,7 @@ struct OnboardingFlow: View {
                 .execute()
 
             // Upload logo (optional)
-            var logoPublicURL: String? = nil
+            var logoPublicURL: String? = existingLogoPublicURL
             if let ui = logoUIImage {
                 let resized = ui.ia_resized(maxDimension: 512)
                 if let data = resized.pngData() {
@@ -223,23 +315,29 @@ struct OnboardingFlow: View {
             let attrs = UserAttributes(data: ["full_name": AnyJSON.string(cleanName)])
             _ = try await client.auth.update(user: attrs)
 
-            // 4) Upsert invoice defaults
-            // Create this table if you don't have it:
-            //   create table invoice_defaults (user_id uuid primary key references auth.users(id), terms text, tax_pct numeric, notes text);
-            struct DefaultsPayload: Encodable {
-                let user_id: String
-                let terms: String
-                let tax_pct: Double
-                let notes: String?
-            }
+            // 4) Persist settings and invoice defaults through the app service
             let tax = Double(defaultTaxPct) ?? 0
-            _ = try await client
-                .from("invoice_defaults")
-                .upsert(DefaultsPayload(user_id: uid, terms: defaultTerms, tax_pct: tax, notes: defaultNotes.isEmpty ? nil : defaultNotes))
-                .execute()
+            let trimmedTerms = defaultTerms.trimmingCharacters(in: .whitespacesAndNewlines)
+            let footer = defaultNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? defaultFooterTemplate(businessName: cleanName)
+                : defaultNotes
+            try await InvoiceDefaultsService.upsertDefaults(
+                taxRate: max(0, tax),
+                dueDays: dueDays(from: trimmedTerms),
+                terms: trimmedTerms.isEmpty ? "Net 30" : trimmedTerms,
+                footerNotes: footer
+            )
+            await ProfileService.updateNotifications(enabled: notificationsEnabled)
 
-            // Invalidate cached brand and notify listeners so first PDF uses the fresh name
-            BrandingService.invalidateCache()
+            // Update cached brand and notify listeners so first PDF uses fresh branding.
+            BrandingService.setCachedBranding(
+                BrandingService.Branding(
+                    businessName: cleanName,
+                    tagline: cleanTag.isEmpty ? nil : cleanTag,
+                    accentHex: accentHex,
+                    logoPublicURL: logoPublicURL
+                )
+            )
             NotificationCenter.default.post(name: .brandingDidChange, object: nil)
 
             await MainActor.run {
@@ -256,6 +354,29 @@ struct OnboardingFlow: View {
                 errorText = error.localizedDescription
             }
         }
+    }
+
+    private func dueDays(from terms: String) -> Int {
+        let lowered = terms.lowercased()
+        if lowered.contains("on receipt") { return 0 }
+        if lowered.contains("net 7") { return 7 }
+        if lowered.contains("net 15") { return 15 }
+        if lowered.contains("net 30") { return 30 }
+        if lowered.contains("net 45") { return 45 }
+        if lowered.contains("net 60") { return 60 }
+
+        if let parsed = Int(terms.filter(\.isNumber)) {
+            return max(0, parsed)
+        }
+        return 30
+    }
+
+    private func defaultFooterTemplate(businessName: String) -> String {
+        let cleanBusiness = businessName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleanBusiness.isEmpty {
+            return "Questions about this invoice? Reach out anytime."
+        }
+        return "Questions about this invoice? Contact \(cleanBusiness)."
     }
 
     // MARK: - Logout from onboarding
@@ -303,18 +424,18 @@ private struct WelcomeStep: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(OnboardingPrimaryButtonStyle(tint: .accentColor))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct NotificationsStep: View {
-    var onGrantedOrSkip: () -> Void
+    var onGrantedOrSkip: (Bool) -> Void
     @State private var requesting = false
     @State private var error: String?
 
-    init(onGranted: @escaping () -> Void) {
+    init(onGranted: @escaping (Bool) -> Void) {
         self.onGrantedOrSkip = onGranted
     }
 
@@ -338,13 +459,29 @@ private struct NotificationsStep: View {
 
             Spacer(minLength: 8)
 
-            HStack {
-                Button("Not now") { onGrantedOrSkip() }
-                Spacer()
-                Button(requesting ? "Requesting…" : "Enable") {
+            HStack(spacing: 12) {
+                Button("Not now") { onGrantedOrSkip(false) }
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color.primary.opacity(0.08))
+                    )
+                    .foregroundStyle(.primary)
+                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                Button(requesting ? "Requesting..." : "Enable") {
                     Task { await request() }
                 }
-                .buttonStyle(.borderedProminent)
+                .font(.headline)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.accentColor.gradient)
+                )
+                .foregroundStyle(.white)
+                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .opacity(requesting ? 0.7 : 1)
                 .disabled(requesting)
             }
         }
@@ -361,7 +498,7 @@ private struct NotificationsStep: View {
 
         await MainActor.run {
             requesting = false
-            onGrantedOrSkip()
+            onGrantedOrSkip(granted)
         }
     }
 }
@@ -369,43 +506,23 @@ private struct NotificationsStep: View {
 private struct BrandingStep: View {
     @Binding var businessName: String
     @Binding var tagline: String
+    @Binding var industry: String
     @Binding var accentColor: Color
 
     @Binding var logoPickerItem: PhotosPickerItem?
     @Binding var logoUIImage: UIImage?
+    @State private var showAILogoGenerator = false
+    @State private var didChooseBrandColor = false
+    private let industries = [
+        "General Business", "Technology", "Construction", "Healthcare", "Finance",
+        "Legal", "Real Estate", "Retail", "Hospitality", "Automotive", "Beauty",
+        "Education", "Fitness", "Logistics", "Creative"
+    ]
 
     var onNext: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 12) {
-                LogoPreview(image: logoUIImage)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    PhotosPicker(selection: $logoPickerItem, matching: .images, photoLibrary: .shared()) {
-                        Label(logoUIImage == nil ? "Choose logo" : "Change logo", systemImage: "photo.badge.plus")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    .onChange(of: logoPickerItem) { _, newItem in
-                        Task { await loadPickedImage(from: newItem) }
-                    }
-
-                    if logoUIImage != nil {
-                        Button(role: .destructive) {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                logoUIImage = nil
-                                logoPickerItem = nil
-                            }
-                        } label: {
-                            Label("Remove", systemImage: "trash")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                    }
-                }
-
-                Spacer()
-            }
-
             labeled("Business name") {
                 TextField("Your business name", text: $businessName)
                     .textInputAutocapitalization(.words)
@@ -414,21 +531,107 @@ private struct BrandingStep: View {
                     .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
             }
 
-            labeled("Tagline (optional)") {
-                TextField("e.g. Handyman Services", text: $tagline)
-                    .textInputAutocapitalization(.words)
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+            if hasName {
+                labeled("Tagline (optional)") {
+                    TextField("e.g. Fast, clean, reliable service", text: $tagline)
+                        .textInputAutocapitalization(.words)
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            HStack {
-                Label("Brand color", systemImage: "paintpalette.fill")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                ColorPicker("", selection: $accentColor, supportsOpacity: false)
-                    .labelsHidden()
+            if hasName {
+                labeled("Industry") {
+                    Picker("Industry", selection: $industry) {
+                        ForEach(industries, id: \.self) { industry in
+                            Text(industry).tag(industry)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            .padding(.top, 6)
+
+            if hasName {
+                HStack {
+                    Label("Brand color", systemImage: "paintpalette.fill")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    ColorPicker("", selection: $accentColor, supportsOpacity: false)
+                        .labelsHidden()
+                }
+                .padding(.top, 6)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            if showLogoSection {
+                HStack(alignment: .center, spacing: 12) {
+                    LogoPreview(image: logoUIImage)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            PhotosPicker(selection: $logoPickerItem, matching: .images, photoLibrary: .shared()) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "photo.badge.plus")
+                                    Text(logoUIImage == nil ? "Choose logo" : "Change logo")
+                                }
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                            }
+                            .buttonStyle(.plain)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(Color.blue.opacity(0.18))
+                            )
+
+                            Button {
+                                showAILogoGenerator = true
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "wand.and.stars")
+                                    Text("AI logo")
+                                }
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                            }
+                            .buttonStyle(.plain)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(Color.blue.opacity(0.18))
+                            )
+                        }
+                        .onChange(of: logoPickerItem) { _, newItem in
+                            Task { await loadPickedImage(from: newItem) }
+                        }
+
+                        if logoUIImage != nil {
+                            Button(role: .destructive) {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    logoUIImage = nil
+                                    logoPickerItem = nil
+                                }
+                            } label: {
+                                Label("Remove", systemImage: "trash")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+
+                        Text("AI logo uses your name, tagline, industry, and color automatically.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             Spacer(minLength: 8)
 
@@ -438,11 +641,36 @@ private struct BrandingStep: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(accentColor)
+            .buttonStyle(OnboardingPrimaryButtonStyle(tint: accentColor))
             .disabled(businessName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
+        .animation(.easeInOut(duration: 0.45), value: hasName)
+        .animation(.easeInOut(duration: 0.45), value: showLogoSection)
+        .onChange(of: accentColor) { _, _ in
+            didChooseBrandColor = true
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .sheet(isPresented: $showAILogoGenerator) {
+            AILogoGeneratorSheet(
+                businessName: businessName,
+                tagline: tagline,
+                accentHex: accentColor.ia_hexString(),
+                defaultIndustry: industry
+            ) { generatedImage in
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    logoUIImage = generatedImage
+                    logoPickerItem = nil
+                }
+            }
+        }
+    }
+
+    private var hasName: Bool {
+        !businessName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var showLogoSection: Bool {
+        hasName && (didChooseBrandColor || logoUIImage != nil)
     }
 
     private func labeled(_ title: String, @ViewBuilder field: () -> some View) -> some View {
@@ -475,31 +703,39 @@ private struct BrandingStep: View {
 
 private struct InvoiceDefaultsStep: View {
     @Binding var terms: String
-    @Binding var taxPct: String
     @Binding var notes: String
     var onNext: () -> Void
 
-    let termOptions = ["Due on receipt", "Net 7", "Net 15", "Net 30"]
+    private let termOptions: [(label: String, value: String)] = [
+        ("Due on receipt", "Due on receipt"),
+        ("7 days", "Net 7"),
+        ("15 days", "Net 15"),
+        ("30 days", "Net 30")
+    ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             labeled("Payment terms") {
                 Picker("", selection: $terms) {
-                    ForEach(termOptions, id: \.self) { Text($0).tag($0) }
+                    ForEach(termOptions, id: \.value) { option in
+                        Text(option.label).tag(option.value)
+                    }
                 }
                 .pickerStyle(.segmented)
             }
-            labeled("Tax (%)") {
-                TextField("0", text: $taxPct)
-                    .keyboardType(.decimalPad)
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
-            }
             labeled("Default note (optional)") {
-                TextField("Thank you for your business!", text: $notes)
+                TextField("Footer note for your PDF template", text: $notes, axis: .vertical)
+                    .lineLimit(3...5)
                     .padding(12)
                     .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
             }
+
+            Text("If empty, we'll generate a professional footer template from your business branding.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Tax rate can be set later in Account > Invoice defaults.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Spacer(minLength: 8)
 
@@ -509,7 +745,7 @@ private struct InvoiceDefaultsStep: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(OnboardingPrimaryButtonStyle(tint: .accentColor))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -552,16 +788,18 @@ private struct StripeConnectStep: View {
                 Text(isLoading ? "Loading…" : "Connect Stripe")
                     .bold().frame(maxWidth: .infinity).padding(.vertical, 14)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(OnboardingPrimaryButtonStyle(tint: .blue))
             .disabled(isLoading)
 
             Button("Do this later") { onSkipOrConnected() }
                 .padding(.top, 8)
+                .buttonStyle(OnboardingSecondaryButtonStyle())
         }
         .padding(.top, 8)
         .sheet(isPresented: $showSafari) {
             if let url = safariURL { SafariView(url: url) }
         }
+        .iaStandardSheetPresentation(detents: [.large], background: .system)
     }
 
     private func startOnboarding() async {
@@ -623,7 +861,7 @@ private struct DoneStep: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(OnboardingPrimaryButtonStyle(tint: .accentColor))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -747,6 +985,37 @@ private struct LogoPreview: View {
     }
 }
 
+private struct OnboardingPrimaryButtonStyle: ButtonStyle {
+    let tint: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .foregroundStyle(.white)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(tint.gradient)
+            )
+            .opacity(configuration.isPressed ? 0.9 : 1)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private struct OnboardingSecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.12 : 0.08))
+            )
+            .foregroundStyle(.primary)
+    }
+}
+
 // MARK: - Helpers
 
 private extension UIImage {
@@ -765,6 +1034,16 @@ private extension UIImage {
 }
 
 private extension Color {
+    init?(hex: String) {
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("#") { s.removeFirst() }
+        guard s.count == 6, let v = Int(s, radix: 16) else { return nil }
+        let r = Double((v >> 16) & 0xFF) / 255.0
+        let g = Double((v >> 8) & 0xFF) / 255.0
+        let b = Double(v & 0xFF) / 255.0
+        self = Color(red: r, green: g, blue: b)
+    }
+
     func ia_hexString() -> String {
         let ui = UIColor(self)
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0

@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct ClientRow: Decodable, Identifiable, Hashable {
+struct ClientRow: Codable, Identifiable, Hashable {
     let id: UUID
     let name: String
     let email: String?

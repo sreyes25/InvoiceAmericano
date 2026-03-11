@@ -10,6 +10,14 @@ import Foundation
 enum AppSupport {
     static let supportEmail = "reyesasergio@resynctechnology.com"
     static let privacyPolicyURL = URL(string: "https://invoiceamericano.app/privacy")!
+    static let openAIAPIKeysURL = URL(string: "https://platform.openai.com/settings/organization/api-keys")!
+    static var openAIAPIKey: String {
+        // Reads from Info.plist -> OPENAI_KEY, which should be provided by your hidden .xcconfig.
+        let raw = Bundle.main.object(forInfoDictionaryKey: "OPENAI_KEY") as? String ?? ""
+        return raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+    }
 }
 
 extension URL {

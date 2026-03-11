@@ -60,14 +60,22 @@ enum ClientService {
     static func fetchClients() async throws -> [ClientRow] {
         let client = SupabaseManager.shared.client
         let uid = try SupabaseManager.shared.requireCurrentUserIDString()
-        let rows: [ClientRow] = try await client
-            .from("clients")
-            .select("id, name, email, phone, address, city, state, zip, created_at, color_hex")
-            .eq("user_id", value: uid)
-            .order("created_at", ascending: false)
-            .execute()
-            .value
-        return rows
+        do {
+            let rows: [ClientRow] = try await client
+                .from("clients")
+                .select("id, name, email, phone, address, city, state, zip, created_at, color_hex")
+                .eq("user_id", value: uid)
+                .order("created_at", ascending: false)
+                .execute()
+                .value
+            OfflineCacheService.saveClients(rows, uid: uid)
+            return rows
+        } catch {
+            if let cached = OfflineCacheService.loadClients(uid: uid) {
+                return cached
+            }
+            throw error
+        }
     }
 
     static func createClient(
@@ -79,8 +87,61 @@ enum ClientService {
         state: String?,
         zip: String?
     ) async throws {
-        let client = SupabaseManager.shared.client
         let userId = try SupabaseManager.shared.requireCurrentUserIDString()
+        if !NetworkMonitorService.isConnectedNow() {
+            await OfflineWriteQueueService.shared.enqueueClientCreate(
+                uid: userId,
+                name: name,
+                email: email,
+                phone: phone,
+                address: address,
+                city: city,
+                state: state,
+                zip: zip
+            )
+            return
+        }
+
+        do {
+            _ = try await createClientOnline(
+                name: name,
+                email: email,
+                phone: phone,
+                address: address,
+                city: city,
+                state: state,
+                zip: zip,
+                uid: userId
+            )
+        } catch {
+            if OfflineWriteQueueService.shouldQueueForOffline(error) {
+                await OfflineWriteQueueService.shared.enqueueClientCreate(
+                    uid: userId,
+                    name: name,
+                    email: email,
+                    phone: phone,
+                    address: address,
+                    city: city,
+                    state: state,
+                    zip: zip
+                )
+                return
+            }
+            throw error
+        }
+    }
+
+    static func createClientOnline(
+        name: String,
+        email: String?,
+        phone: String?,
+        address: String?,
+        city: String?,
+        state: String?,
+        zip: String?,
+        uid: String
+    ) async throws -> ClientRow {
+        let client = SupabaseManager.shared.client
 
         let payload = NewClientPayload(
             name: name,
@@ -90,29 +151,57 @@ enum ClientService {
             city: city,
             state: state,
             zip: zip,
-            user_id: userId
+            user_id: uid
         )
 
-        _ = try await client
+        let created: ClientRow = try await client
             .from("clients")
             .insert(payload)
-            .eq("user_id", value: userId)
+            .select("id, name, email, phone, address, city, state, zip, created_at, color_hex")
+            .single()
             .execute()
+            .value
+
+        if var cached = OfflineCacheService.loadClients(uid: uid) {
+            cached.removeAll { $0.id == created.id }
+            cached.insert(created, at: 0)
+            OfflineCacheService.saveClients(cached, uid: uid)
+        }
+
+        return created
     }
 
     // Fetch a single client by id
     static func fetchClient(id: UUID) async throws -> ClientRow {
         let client = SupabaseManager.shared.client
         let uid = try SupabaseManager.shared.requireCurrentUserIDString()
-        let row: ClientRow = try await client
-            .from("clients")
-            .select("id, name, email, phone, address, city, state, zip, created_at, color_hex")
-            .eq("id", value: id.uuidString)
-            .eq("user_id", value: uid)
-            .single()
-            .execute()
-            .value
-        return row
+        do {
+            let row: ClientRow = try await client
+                .from("clients")
+                .select("id, name, email, phone, address, city, state, zip, created_at, color_hex")
+                .eq("id", value: id.uuidString)
+                .eq("user_id", value: uid)
+                .single()
+                .execute()
+                .value
+            if var cached = OfflineCacheService.loadClients(uid: uid) {
+                if let existing = cached.firstIndex(where: { $0.id == row.id }) {
+                    cached[existing] = row
+                } else {
+                    cached.insert(row, at: 0)
+                }
+                OfflineCacheService.saveClients(cached, uid: uid)
+            } else {
+                OfflineCacheService.saveClients([row], uid: uid)
+            }
+            return row
+        } catch {
+            if let cached = OfflineCacheService.loadClients(uid: uid),
+               let row = cached.first(where: { $0.id == id }) {
+                return row
+            }
+            throw error
+        }
     }
 
     // Update a client (only fields you pass will be changed; no nulls)
@@ -145,6 +234,24 @@ enum ClientService {
             .match(["id": id.uuidString])
             .eq("user_id", value: uid)
             .execute()
+
+        if var cached = OfflineCacheService.loadClients(uid: uid),
+           let idx = cached.firstIndex(where: { $0.id == id }) {
+            let current = cached[idx]
+            cached[idx] = ClientRow(
+                id: current.id,
+                name: name ?? current.name,
+                email: email ?? current.email,
+                phone: phone ?? current.phone,
+                address: address ?? current.address,
+                city: city ?? current.city,
+                state: state ?? current.state,
+                zip: zip ?? current.zip,
+                created_at: current.created_at,
+                color_hex: current.color_hex
+            )
+            OfflineCacheService.saveClients(cached, uid: uid)
+        }
     }
 
     // Fetch invoices that belong to a specific client
@@ -154,15 +261,21 @@ enum ClientService {
         let uid = try SupabaseManager.shared.requireCurrentUserIDString()
 
         // NOTE: no .single() here — this returns an array
-        let rows: [InvoiceRow] = try await client
-            .from("invoices")
-            .select("id, number, status, total, created_at, sent_at, due_date")
-            .eq("client_id", value: clientId.uuidString)
-            .eq("user_id", value: uid)
-            .order("created_at", ascending: false)
-            .execute()
-            .value
-
-        return rows
+        do {
+            let rows: [InvoiceRow] = try await client
+                .from("invoices")
+                .select("id, number, status, total, created_at, sent_at, due_date")
+                .eq("client_id", value: clientId.uuidString)
+                .eq("user_id", value: uid)
+                .order("created_at", ascending: false)
+                .execute()
+                .value
+            return rows
+        } catch {
+            if let cached = OfflineCacheService.loadInvoices(uid: uid) {
+                return cached.filter { $0.clientId == clientId }
+            }
+            throw error
+        }
     }
 }

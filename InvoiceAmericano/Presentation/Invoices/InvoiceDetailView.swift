@@ -327,13 +327,13 @@ struct InvoiceDetailView: View {
                 Task { await load() }
             }
         }
-        .onChange(of: didDownloadPDF) { newValue in
+        .onChange(of: didDownloadPDF) { _, newValue in
             guard newValue else { return }
             Task { @MainActor in
                 maybeShowMarkSentPrompt()
             }
         }
-        .onChange(of: didExportPDF) { newValue in
+        .onChange(of: didExportPDF) { _, newValue in
             guard newValue else { return }
             Task { @MainActor in
                 maybeShowMarkSentPrompt()
@@ -390,6 +390,7 @@ struct InvoiceDetailView: View {
                 }
             }
         }
+        .iaStandardSheetPresentation(detents: [.medium, .large], background: .system)
         .sheet(item: $previewItem) { item in
             PDFPreviewSheet(
                 url: item.url,
@@ -407,6 +408,7 @@ struct InvoiceDetailView: View {
                 }
             )
         }
+        .iaStandardSheetPresentation(detents: [.large])
         .sheet(isPresented: $showProcessingFeeDisclaimer) {
             ProcessingFeeDisclaimerSheet(
                 invoiceNumber: detail?.number,
@@ -423,8 +425,7 @@ struct InvoiceDetailView: View {
                     Task { await send() }
                 }
             )
-            .presentationDetents([.medium])
-            .presentationDragIndicator(.visible)
+            .iaStandardSheetPresentation(detents: [.medium], background: .glass)
         }
     }
 
@@ -574,7 +575,6 @@ struct InvoiceDetailView: View {
             // fetch stripe status (global per-user)
             let status = await IA_fetchStripeStatus()
             let connected = (status?.connected == true)
-            let pdfSaved = didPersistPDFSaved
             
             await MainActor.run {
                 detail = d
@@ -1011,6 +1011,7 @@ private struct PDFPreviewSheet: View {
                 dismiss() // ✅ return to invoice detail view immediately after export
             }
         }
+        .iaStandardSheetPresentation(detents: [.medium, .large], background: .system)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Done") { dismiss() }

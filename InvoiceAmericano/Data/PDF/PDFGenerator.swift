@@ -542,7 +542,8 @@ enum PDFGenerator {
                 width: footerWidth
             )
 
-            if let footer = footerText?.trimmedNonEmpty {
+            let resolvedFooter = (footerText?.trimmedNonEmpty) ?? defaultFooterText(for: businessName)
+            if let footer = resolvedFooter {
                 draw(
                     footer,
                     at: CGPoint(x: inset, y: footerTop + 10 + 14),
@@ -595,6 +596,14 @@ enum PDFGenerator {
             context: nil
         )
         return ceil(rect.height)
+    }
+
+    private static func defaultFooterText(for businessName: String) -> String? {
+        let clean = businessName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean.lowercased() != "your business" else {
+            return "Questions about this invoice? Reach out anytime."
+        }
+        return "Questions about this invoice? Contact \(clean)."
     }
 
     /// Split `text` into a prefix that fits within `maxHeight` and an optional remainder.

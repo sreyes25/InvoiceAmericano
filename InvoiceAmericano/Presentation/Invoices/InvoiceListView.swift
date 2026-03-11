@@ -14,6 +14,7 @@ private struct SharePayload: Identifiable {
 }
 
 struct InvoiceListView: View {
+    @StateObject private var networkMonitor = NetworkMonitorService.shared
     @State private var status: InvoiceStatus = .all
     @State private var showNew = false
     @State private var invoices: [InvoiceRow] = []
@@ -238,6 +239,9 @@ struct InvoiceListView: View {
             ScrollView {
                 VStack(spacing: 14) {
                     searchBar
+                    if !networkMonitor.isConnected {
+                        offlineBanner
+                    }
                     invoicesSection
                 }
                 .padding(.horizontal, 16)
@@ -255,9 +259,11 @@ struct InvoiceListView: View {
             .sheet(isPresented: $showNew, content: {
                 newInvoiceSheet
             })
+            .iaStandardSheetPresentation(detents: [.large])
             .sheet(item: $sharePayload, content: { payload in
                 ActivitySheet(items: payload.items, onComplete: onShareCompleted)
             })
+            .iaStandardSheetPresentation(detents: [.medium, .large], background: .system)
             .task {
                 didInitialLoad = true
                 await load()
@@ -272,6 +278,9 @@ struct InvoiceListView: View {
                 Task { await load() }
             }
             .refreshable { await load() }
+            .onReceive(NotificationCenter.default.publisher(for: .offlineQueueDidSync)) { _ in
+                Task { await load() }
+            }
             .scrollIndicators(.hidden)
         }
     }
@@ -344,6 +353,26 @@ struct InvoiceListView: View {
         }
     }
 
+    private var offlineBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "wifi.slash")
+                .foregroundStyle(.orange)
+            Text("Offline mode: showing cached invoices. New invoices will sync automatically when you reconnect.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.orange.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.25))
+        )
+    }
+
     // MARK: - Toolbar
 
     @ToolbarContentBuilder
@@ -368,6 +397,7 @@ struct InvoiceListView: View {
                 Task { await createInvoice(from: draft) }
             })
         }
+        .iaSheetNavigationChrome()
     }
 
     // MARK: - Actions

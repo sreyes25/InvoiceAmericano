@@ -8,7 +8,7 @@
 // Models/InvoiceDetail.swift
 import Foundation
 
-struct LineItemRow: Decodable, Identifiable {
+struct LineItemRow: Codable, Identifiable {
     let id: UUID
     let title: String?
     let description: String
@@ -17,7 +17,7 @@ struct LineItemRow: Decodable, Identifiable {
     let amount: Double
 }
 
-struct InvoiceDetail: Decodable {
+struct InvoiceDetail: Codable {
     let id: UUID
     let number: String
     let status: String

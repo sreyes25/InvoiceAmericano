@@ -23,6 +23,7 @@ struct BrandingView: View {
     @State private var pickerItem: PhotosPickerItem?
     @State private var pickedImageData: Data?
     @State private var pickedUIImage: UIImage?
+    @State private var showAILogoGenerator = false
 
     // UX
     @State private var isSaving = false
@@ -94,8 +95,40 @@ struct BrandingView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    PhotosPicker(selection: $pickerItem, matching: .images, photoLibrary: .shared()) {
-                        Label("Choose logo", systemImage: "plus.circle")
+                    HStack(spacing: 10) {
+                        PhotosPicker(selection: $pickerItem, matching: .images, photoLibrary: .shared()) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "plus.circle")
+                                Text("Choose logo")
+                            }
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                        }
+                        .buttonStyle(.plain)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color.blue.opacity(0.18))
+                        )
+
+                        Button {
+                            showAILogoGenerator = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "wand.and.stars")
+                                Text("AI logo")
+                            }
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                        }
+                        .buttonStyle(.plain)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color.blue.opacity(0.18))
+                        )
                     }
                     .onChange(of: pickerItem) { _, newItem in
                         Task { await loadPickedImage(from: newItem) }
@@ -109,12 +142,28 @@ struct BrandingView: View {
                             Label("Remove", systemImage: "trash")
                         }
                     }
+
+                    Text("AI logo uses your business name, tagline, industry/theme choices, and brand color automatically.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
         .padding()
         .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground)))
         .shadow(color: .black.opacity(0.05), radius: 6, y: 3)
+        .sheet(isPresented: $showAILogoGenerator) {
+            AILogoGeneratorSheet(
+                businessName: businessName,
+                tagline: tagline,
+                accentHex: accentColor.ia_hexString(),
+                defaultIndustry: nil
+            ) { generatedImage in
+                pickedUIImage = generatedImage
+                pickedImageData = generatedImage.pngData()
+                pickerItem = nil
+            }
+        }
     }
 
     private var accentColorCard: some View {

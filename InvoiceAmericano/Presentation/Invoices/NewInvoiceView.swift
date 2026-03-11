@@ -400,10 +400,7 @@ struct NewInvoiceView: View {
                 showNewClientSheet = true
             }
         )
-        .presentationDetents([.large])
-        .presentationCornerRadius(28)
-        .presentationBackground(.ultraThinMaterial)
-        .presentationDragIndicator(.visible)
+        .iaStandardSheetPresentation(detents: [.large], background: .glass)
         .sheet(isPresented: $showNewClientSheet) {
             NavigationStack {
                 NewClientView {
@@ -411,7 +408,9 @@ struct NewInvoiceView: View {
                     Task { await loadClients() }
                 }
             }
+            .iaSheetNavigationChrome()
         }
+        .iaStandardSheetPresentation(detents: [.large], background: .glass)
     }
 
     private var itemPickerSheet: some View {
@@ -432,10 +431,7 @@ struct NewInvoiceView: View {
             },
             onClose: { showItemPicker = false }
         )
-        .presentationDetents([.large])
-        .presentationCornerRadius(28)
-        .presentationBackground(.ultraThinMaterial)
-        .presentationDragIndicator(.visible)
+        .iaStandardSheetPresentation(detents: [.large], background: .glass)
     }
 
     private var detailsSheet: some View {
@@ -461,6 +457,7 @@ struct NewInvoiceView: View {
                 }
             }
             .navigationTitle("Invoice details")
+            .iaSheetNavigationChrome()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { showDueDateSheet = false }
@@ -470,8 +467,7 @@ struct NewInvoiceView: View {
                 }
             }
         }
-        .presentationDetents([.medium])
-        .presentationDragIndicator(.visible)
+        .iaStandardSheetPresentation(detents: [.medium, .large], background: .glass)
         .onChange(of: draft.dueDate) { _, _ in
             didUserChangeDueDate = true
         }
@@ -587,6 +583,8 @@ struct NewInvoiceView: View {
                 }
             }
         }
+        .iaSheetNavigationChrome()
+        .iaStandardSheetPresentation(detents: [.large], background: .system)
     }
 
     private func updateFooterOpacity(totalsTopY: CGFloat, containerHeight: CGFloat) {
@@ -1445,6 +1443,7 @@ private struct PaymentMethodEditorSheet: View {
             }
             .navigationTitle("Payment Method")
             .navigationBarTitleDisplayMode(.inline)
+            .iaSheetNavigationChrome()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
@@ -1454,8 +1453,7 @@ private struct PaymentMethodEditorSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .iaStandardSheetPresentation(detents: [.medium, .large], background: .glass)
     }
 }
 
@@ -1980,7 +1978,7 @@ private struct ItemPreviewCard: View {
 
                                 Button {
                                     withAnimation(.easeInOut(duration: 0.15)) {
-                                        listItems.remove(at: idx)
+                                        _ = listItems.remove(at: idx)
                                     }
                                     syncDescriptionFromListItems()
                                 } label: {
