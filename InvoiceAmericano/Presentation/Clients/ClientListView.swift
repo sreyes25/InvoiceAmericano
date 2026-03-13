@@ -431,15 +431,6 @@ private struct AnimatedClientsBackground: View {
     }
 }
 
-private struct ClientDetailPlaceholder: View {
-    let clientId: UUID
-    var body: some View {
-        Text("Client \(clientId.uuidString)").padding().navigationTitle("Client")
-    }
-}
-
-
-
 #Preview("Clients – Light") {
     ClientListView(previewMode: true)
         .preferredColorScheme(.light)

@@ -1070,27 +1070,19 @@ private struct PlaceholderClientCard: View {
     @Environment(\.colorScheme) private var colorScheme
     var body: some View {
         HStack(spacing: 12) {
-            // Avatar / initials bubble (CL for Client)
+            // Avatar / initials bubble
             ZStack {
                 Circle().fill(Color.gray.opacity(0.35))
-                Text("CL")
+                Image(systemName: "person.crop.circle")
                     .font(.subheadline.bold())
                     .foregroundStyle(.white)
             }
             .frame(width: 40, height: 40)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Client")
+                Text("Select a client")
                     .font(.headline)
-                HStack(spacing: 6) {
-                    Image(systemName: "envelope")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                    Text("client@email.com")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Text("Client address")
+                Text("Tap to choose from your saved clients")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1112,7 +1104,7 @@ private struct PlaceholderClientCard: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("Default client placeholder. Tap to select a client."))
+        .accessibilityLabel(Text("No client selected. Tap to choose a client."))
     }
 }
 
@@ -1674,7 +1666,7 @@ private struct ItemPickerSheet: View {
 
 // Floating label single-line field
 private struct FloatingField: View {
-    let title: String, placeholder: String
+    let title: String, hintText: String
     @Binding var text: String
     @FocusState private var focused: Bool
 
@@ -1684,7 +1676,7 @@ private struct FloatingField: View {
                 .stroke(focused ? Color.accentColor : .secondary.opacity(0.2))
                 .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground)))
 
-            TextField(placeholder, text: $text)
+            TextField(hintText, text: $text)
                 .padding(.top, 14)
                 .padding(.horizontal, 12)
                 .focused($focused)
@@ -1706,7 +1698,7 @@ private struct FloatingField: View {
 
 // Floating label multi-line field
 private struct FloatingMultilineField: View {
-    let title: String, placeholder: String
+    let title: String, hintText: String
     @Binding var text: String
     var minHeight: CGFloat = 96
     @FocusState private var focused: Bool
@@ -1734,7 +1726,7 @@ private struct FloatingMultilineField: View {
                     .textSelection(.enabled)
 
                 if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(placeholder)
+                    Text(hintText)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)
@@ -1859,7 +1851,7 @@ private struct ItemPreviewCard: View {
         VStack(alignment: .leading, spacing: 16) {
             // TITLE — collapsible button → field
             if isTitleOpen {
-                FloatingField(title: "Item", placeholder: "Title (optional)", text: $title)
+                FloatingField(title: "Item", hintText: "Title (optional)", text: $title)
                     .transition(.move(edge: .top).combined(with: .opacity))
             } else {
                 Button {
@@ -1892,7 +1884,7 @@ private struct ItemPreviewCard: View {
             if isDescOpen {
                 FloatingMultilineField(
                     title: "Description",
-                    placeholder: "Describe the work (optional)",
+                    hintText: "Describe the work (optional)",
                     text: $description,
                     minHeight: 120
                 )

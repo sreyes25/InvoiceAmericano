@@ -779,6 +779,8 @@ struct AccountView: View {
 
 // MARK: - Profile screen (edits the single source of truth)
 struct AccountDetailsView: View {
+    @Environment(\.dismiss) private var dismiss
+
     let uid: String
     let displayName: String            // initial shown name
     let email: String
@@ -789,6 +791,9 @@ struct AccountDetailsView: View {
     @State private var workingName: String = ""
     @State private var saving = false
     @State private var saveError: String?
+    @State private var showDeleteAccountConfirm = false
+    @State private var deletingAccount = false
+    @State private var accountDeleteError: String?
 
     var body: some View {
         List {
@@ -863,6 +868,20 @@ struct AccountDetailsView: View {
             Section("Security") {
                 Label("Password & sign-in", systemImage: "lock.fill")
                     .foregroundStyle(.secondary)
+
+                Button(role: .destructive) {
+                    showDeleteAccountConfirm = true
+                } label: {
+                    HStack {
+                        Label("Delete Account", systemImage: "trash")
+                        Spacer()
+                        if deletingAccount {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                .disabled(deletingAccount)
             }
         }
         .onAppear {
@@ -876,6 +895,26 @@ struct AccountDetailsView: View {
                 saveError = nil
                 showEditName = true
             }
+        }
+        .confirmationDialog(
+            "Delete account permanently?",
+            isPresented: $showDeleteAccountConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Account", role: .destructive) {
+                Task { await deleteAccount() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes your account and associated app data.")
+        }
+        .alert("Account Deletion Failed", isPresented: Binding(
+            get: { accountDeleteError != nil },
+            set: { if !$0 { accountDeleteError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(accountDeleteError ?? "Something went wrong.")
         }
         .sheet(isPresented: $showEditName) {
             NavigationStack {
@@ -960,6 +999,24 @@ struct AccountDetailsView: View {
             await MainActor.run {
                 saveError = error.localizedDescription
                 saving = false
+            }
+        }
+    }
+
+    private func deleteAccount() async {
+        await MainActor.run { deletingAccount = true }
+        defer { Task { await MainActor.run { deletingAccount = false } } }
+
+        AnalyticsService.track(.authDeleteStarted, metadata: ["method": "in_app"])
+        do {
+            try await AccountDeletionService.deleteCurrentAccount()
+            AnalyticsService.track(.authDeleteSucceeded, metadata: ["method": "in_app"])
+            await MainActor.run {
+                dismiss()
+            }
+        } catch {
+            await MainActor.run {
+                accountDeleteError = error.localizedDescription
             }
         }
     }

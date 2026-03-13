@@ -668,11 +668,15 @@ struct HomeView: View {
             do {
                 let rows = try await ActivityService.fetchRecentActivityJoined(limit: 5)
                 if rows.isEmpty {
+                    #if DEBUG
                     await ActivityService.debugDumpRecentActivityJSON(limit: 5)
+                    #endif
                 }
                 return rows
             } catch {
+                #if DEBUG
                 await ActivityService.debugDumpRecentActivityJSON(limit: 5)
+                #endif
                 print("⚠️ Activity decode failed, defaulting to empty: \(error)")
                 return []
             }

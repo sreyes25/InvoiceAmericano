@@ -20,6 +20,8 @@ enum AnalyticsService {
         case authSignInStarted    = "auth_sign_in_started"
         case authSignInSucceeded  = "auth_sign_in_succeeded"
         case authSignedOut        = "auth_signed_out"
+        case authDeleteStarted    = "auth_delete_started"
+        case authDeleteSucceeded  = "auth_delete_succeeded"
         case onboardingCompleted  = "onboarding_completed"
         case invoiceCreated       = "invoice_created"
         case invoiceSent          = "invoice_sent"
