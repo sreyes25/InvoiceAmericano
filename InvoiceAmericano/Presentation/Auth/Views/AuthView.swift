@@ -190,7 +190,7 @@ struct AuthView: View {
             } else {
                 // Subtle strength readout only while typing
                 if !vm.password.isEmpty {
-                    Text("Strength: \(vm.strength.rawValue.capitalized)")
+                    Text(I18n.tr("auth.password_strength", I18n.tr("auth.strength.\(vm.strength.rawValue)")))
                         .font(.caption)
                         .foregroundStyle(vm.strength == .weak ? .red : (vm.strength == .ok ? .orange : .green))
                 }
@@ -253,7 +253,7 @@ struct AuthView: View {
 
     // MARK: - Small pieces
 
-    private var title: String {
+    private var title: LocalizedStringKey {
         switch vm.mode {
         case .chooser: return "Welcome"
         case .signIn:  return "Sign In"
@@ -261,7 +261,7 @@ struct AuthView: View {
         }
     }
 
-    private func topBarBack(_ label: String) -> some View {
+    private func topBarBack(_ label: LocalizedStringKey) -> some View {
         HStack(spacing: 12) {
             // Left: high-contrast, thumb-friendly back button
             Button {
@@ -344,7 +344,7 @@ private struct BrandHeader: View {
         .animation(.snappy(duration: 0.45), value: mode)
     }
 
-    private var subtitle: String {
+    private var subtitle: LocalizedStringKey {
         switch mode {
         case .chooser: return "Choose how you’d like to get started"
         case .signIn:  return "Sign in to continue"

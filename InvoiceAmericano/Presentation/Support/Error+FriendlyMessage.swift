@@ -31,7 +31,7 @@ extension Error {
     /// Provides a user-facing error message with an offline-specific variant.
     var friendlyMessage: String {
         if isOfflineError {
-            return "You’re offline. Check your connection and try again."
+            return I18n.tr("error.offline_retry")
         }
         return localizedDescription
     }

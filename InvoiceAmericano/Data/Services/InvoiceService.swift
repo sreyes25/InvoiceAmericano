@@ -316,7 +316,8 @@ enum InvoiceService {
         // ---- 4) Notes + per-invoice payment metadata ----
         let effectiveNotes = InvoiceNotesCodec.compose(
             userNotes: draft.notes,
-            payment: draft.paymentInfo
+            payment: draft.paymentInfo,
+            invoiceLanguage: draft.invoiceLanguage
         )
 
         let effectiveSubtotal = draft.subTotal
@@ -396,6 +397,7 @@ enum InvoiceService {
             paymentMethod: pending.paymentMethod,
             paymentDetails: pending.paymentDetails,
             paymentAddress: pending.paymentAddress,
+            invoiceLanguage: InvoiceContentLanguage(rawValue: pending.invoiceLanguageCode ?? "") ?? .english,
             items: pending.items.map { item in
                 LineItemDraft(
                     title: item.title,

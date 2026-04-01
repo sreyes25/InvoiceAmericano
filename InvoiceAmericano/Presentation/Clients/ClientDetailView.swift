@@ -209,7 +209,7 @@ private struct InitialsAvatar: View {
                 .foregroundStyle(.white)
         }
         .shadow(color: base.opacity(0.18), radius: 10, y: 6)
-        .accessibilityLabel(Text("Client avatar: \(initials)"))
+        .accessibilityLabel(Text(I18n.tr("clients.avatar_accessibility", initials)))
     }
 
     private func initialsFromName(_ s: String) -> String {
@@ -326,7 +326,7 @@ private struct InvoiceRowCard: View {
 private struct StatusChip: View {
     let status: String
     var body: some View {
-        Text(status.capitalized)
+        Text(InvoiceStatusLocalizer.title(for: status))
             .font(.caption2)
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(color.opacity(0.15))

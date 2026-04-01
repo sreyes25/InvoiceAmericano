@@ -175,7 +175,7 @@ enum PDFGenerator {
         // PDF metadata
         let format = UIGraphicsPDFRendererFormat()
         format.documentInfo = [
-            kCGPDFContextTitle: "Invoice \(snapshot.number)",
+            kCGPDFContextTitle: "\(snapshot.invoiceLanguage == .spanish ? "Factura" : "Invoice") \(snapshot.number)",
             kCGPDFContextCreator: "InvoiceAmericano"
         ] as [String : Any]
 
@@ -239,11 +239,23 @@ enum PDFGenerator {
             // Add more space below the taller logo
             var metaY = rightBlockTop + 5
             if let issued = snapshot.issuedAt {
-                draw("Date: \(prettyDate(issued))", at: CGPoint(x: metaX, y: metaY), font: metaFont, align: .right, width: metaWidth)
+                draw(
+                    "\(snapshot.invoiceLanguage.pdfDateLabel): \(prettyDate(issued, language: snapshot.invoiceLanguage))",
+                    at: CGPoint(x: metaX, y: metaY),
+                    font: metaFont,
+                    align: .right,
+                    width: metaWidth
+                )
                 metaY += 16
             }
             if let due = snapshot.dueDate {
-                draw("Due: \(prettyDate(due))", at: CGPoint(x: metaX, y: metaY), font: metaFont, align: .right, width: metaWidth)
+                draw(
+                    "\(snapshot.invoiceLanguage.pdfDueLabel): \(prettyDate(due, language: snapshot.invoiceLanguage))",
+                    at: CGPoint(x: metaX, y: metaY),
+                    font: metaFont,
+                    align: .right,
+                    width: metaWidth
+                )
             }
 
             // Push content further down to accommodate the bigger logo
@@ -254,7 +266,7 @@ enum PDFGenerator {
             y += 12
 
             // ===== Bill To block =====
-            draw("Bill To:", at: CGPoint(x: leftX, y: y), font: UIFont.boldSystemFont(ofSize: 13))
+            draw(snapshot.invoiceLanguage.pdfBillToLabel, at: CGPoint(x: leftX, y: y), font: UIFont.boldSystemFont(ofSize: 13))
             y += 16
             draw(snapshot.client?.name ?? "—", at: CGPoint(x: leftX, y: y), font: UIFont.systemFont(ofSize: 13))
             y += 20
@@ -278,13 +290,13 @@ enum PDFGenerator {
                 drawLine(y: yy, inset: inset, pageWidth: pageW)
                 yy += 10
 
-                draw("ITEM",
+                draw(snapshot.invoiceLanguage.pdfItemLabel,
                      at: CGPoint(x: colIndexX,  y: yy),
                      font: .boldSystemFont(ofSize: 12))
-                draw("DESCRIPTION",
+                draw(snapshot.invoiceLanguage.pdfDescriptionLabel,
                      at: CGPoint(x: colDescX,   y: yy),
                      font: .boldSystemFont(ofSize: 12))
-                draw("AMOUNT",
+                draw(snapshot.invoiceLanguage.pdfAmountLabel,
                      at: CGPoint(x: colAmtX,    y: yy),
                      font: .boldSystemFont(ofSize: 12),
                      align: .right,
@@ -305,7 +317,7 @@ enum PDFGenerator {
                 UIRectFill(CGRect(x: 0, y: 0, width: pageW, height: pageH))
 
                 var yy: CGFloat = inset
-                draw("Items (continued)", at: CGPoint(x: leftX, y: yy), font: UIFont.boldSystemFont(ofSize: 13))
+                draw(snapshot.invoiceLanguage.pdfItemsContinuedLabel, at: CGPoint(x: leftX, y: yy), font: UIFont.boldSystemFont(ofSize: 13))
                 yy += 22
                 y = drawItemsHeader(at: yy)
             }
@@ -390,7 +402,7 @@ enum PDFGenerator {
 
                     if remainingBody == nil, item.quantity > 1, item.amount > 0 {
                         let unit = item.amount / Double(item.quantity)
-                        let unitsText = "\(item.quantity) x \(currency(unit, code: snapshot.currency)) each"
+                        let unitsText = "\(item.quantity) x \(currency(unit, code: snapshot.currency)) \(snapshot.invoiceLanguage.pdfEachSuffix)"
                         let spacingBelow: CGFloat = 2
                         var unitsY = startY + rowHeight + spacingBelow
 
@@ -439,14 +451,14 @@ enum PDFGenerator {
             let totalsValueX          = rightX
             let totalsLabelX          = totalsValueX - totalsValueW - 12 - totalsLabelW
 
-            draw("SUBTOTAL", at: CGPoint(x: totalsLabelX, y: y), font: .systemFont(ofSize: 12), align: .right, width: totalsLabelW)
+            draw(snapshot.invoiceLanguage.pdfSubtotalLabel, at: CGPoint(x: totalsLabelX, y: y), font: .systemFont(ofSize: 12), align: .right, width: totalsLabelW)
             draw(currency(snapshot.subtotal, code: snapshot.currency),
                  at: CGPoint(x: totalsValueX - totalsValueW, y: y),
                  font: .systemFont(ofSize: 12), align: .right, width: totalsValueW)
             y += 16
 
             if snapshot.tax != 0 {
-                draw("TAX", at: CGPoint(x: totalsLabelX, y: y), font: .systemFont(ofSize: 12), align: .right, width: totalsLabelW)
+                draw(snapshot.invoiceLanguage.pdfTaxLabel, at: CGPoint(x: totalsLabelX, y: y), font: .systemFont(ofSize: 12), align: .right, width: totalsLabelW)
                 draw(currency(snapshot.tax, code: snapshot.currency),
                      at: CGPoint(x: totalsValueX - totalsValueW, y: y),
                      font: .systemFont(ofSize: 12), align: .right, width: totalsValueW)
@@ -458,20 +470,22 @@ enum PDFGenerator {
             UIRectFill(CGRect(x: totalsLabelX, y: stripeY, width: totalsLabelW + 12 + totalsValueW, height: 2))
             y += 12
 
-            draw("TOTAL", at: CGPoint(x: totalsLabelX, y: y), font: .boldSystemFont(ofSize: 13), align: .right, width: totalsLabelW)
+            draw(snapshot.invoiceLanguage.pdfTotalLabel, at: CGPoint(x: totalsLabelX, y: y), font: .boldSystemFont(ofSize: 13), align: .right, width: totalsLabelW)
             draw(currency(snapshot.total, code: snapshot.currency),
                  at: CGPoint(x: totalsValueX - totalsValueW, y: y),
                  font: .boldSystemFont(ofSize: 13), align: .right, width: totalsValueW)
             y += 24
 
             if let payment = snapshot.payment {
-                let lines = payment.pdfLines.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                let lines = payment
+                    .pdfLines(language: snapshot.invoiceLanguage)
+                    .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
                 if !lines.isEmpty {
                     let paymentLabelFont = UIFont.boldSystemFont(ofSize: 12)
                     let paymentBodyFont  = UIFont.systemFont(ofSize: 11)
 
                     draw(
-                        "Payment Details:",
+                        snapshot.invoiceLanguage.pdfPaymentDetailsLabel,
                         at: CGPoint(x: leftX, y: y),
                         font: paymentLabelFont
                     )
@@ -514,7 +528,7 @@ enum PDFGenerator {
                 path.stroke()
 
                 let labelOrigin = CGPoint(x: boxLeft + innerPadding, y: y + innerPadding)
-                draw("Note", at: labelOrigin, font: labelFont)
+                draw(snapshot.invoiceLanguage.pdfNoteLabel, at: labelOrigin, font: labelFont)
 
                 let bodyOrigin = CGPoint(x: boxLeft + innerPadding, y: labelOrigin.y + labelHeight + 4)
                 draw(note,
@@ -535,14 +549,15 @@ enum PDFGenerator {
             let noteFont   = UIFont.systemFont(ofSize: 10)
 
             draw(
-                "Thank you for your business!",
+                snapshot.invoiceLanguage.pdfThankYouLine,
                 at: CGPoint(x: inset, y: footerTop + 10),
                 font: thankFont,
                 align: .center,
                 width: footerWidth
             )
 
-            let resolvedFooter = (footerText?.trimmedNonEmpty) ?? defaultFooterText(for: businessName)
+            let resolvedFooter = (footerText?.trimmedNonEmpty)
+                ?? defaultFooterText(for: businessName, language: snapshot.invoiceLanguage)
             if let footer = resolvedFooter {
                 draw(
                     footer,
@@ -598,12 +613,15 @@ enum PDFGenerator {
         return ceil(rect.height)
     }
 
-    private static func defaultFooterText(for businessName: String) -> String? {
+    private static func defaultFooterText(
+        for businessName: String,
+        language: InvoiceContentLanguage
+    ) -> String? {
         let clean = businessName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, clean.lowercased() != "your business" else {
-            return "Questions about this invoice? Reach out anytime."
+        if clean.isEmpty || clean.lowercased() == "your business" {
+            return language.defaultFooterTemplate(businessName: "")
         }
-        return "Questions about this invoice? Contact \(clean)."
+        return language.defaultFooterTemplate(businessName: clean)
     }
 
     /// Split `text` into a prefix that fits within `maxHeight` and an optional remainder.
@@ -730,7 +748,7 @@ enum PDFGenerator {
         return f.string(from: NSNumber(value: value)) ?? String(format: "$%.2f", value)
     }
 
-    private static func prettyDate(_ s: String) -> String {
+    private static func prettyDate(_ s: String, language: InvoiceContentLanguage) -> String {
         // Accept: "yyyy-MM-dd" OR ISO8601 (with or w/out fractional seconds)
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
@@ -743,19 +761,19 @@ enum PDFGenerator {
         ymd.locale = Locale(identifier: "en_US_POSIX")
 
         let out = DateFormatter()
-        out.dateFormat = "MM/dd/yy"
+        out.dateFormat = (language == .spanish) ? "dd/MM/yy" : "MM/dd/yy"
         out.timeZone = .current
-        out.locale = Locale(identifier: "en_US_POSIX")
+        out.locale = Locale(identifier: language.localeIdentifier)
 
         let d = iso.date(from: s) ?? isoFS.date(from: s) ?? ymd.date(from: s)
         return d.map { out.string(from: $0) } ?? s
     }
 
-    private static func prettyDate(_ date: Date) -> String {
+    private static func prettyDate(_ date: Date, language: InvoiceContentLanguage) -> String {
         let out = DateFormatter()
-        out.dateFormat = "MM/dd/yy"
+        out.dateFormat = (language == .spanish) ? "dd/MM/yy" : "MM/dd/yy"
         out.timeZone = .current
-        out.locale = Locale(identifier: "en_US_POSIX")
+        out.locale = Locale(identifier: language.localeIdentifier)
         return out.string(from: date)
     }
 

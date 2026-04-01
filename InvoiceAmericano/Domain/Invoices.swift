@@ -70,14 +70,14 @@ enum InvoicePaymentMethod: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .none: return "None"
-        case .zelle: return "Zelle"
-        case .check: return "Check"
-        case .stripe: return "Stripe payment link"
-        case .venmo: return "Venmo"
-        case .cashApp: return "Cash App"
-        case .ach: return "Bank Transfer (ACH)"
-        case .custom: return "Other"
+        case .none: return I18n.tr("payment_method.none")
+        case .zelle: return I18n.tr("payment_method.zelle")
+        case .check: return I18n.tr("payment_method.check")
+        case .stripe: return I18n.tr("payment_method.stripe")
+        case .venmo: return I18n.tr("payment_method.venmo")
+        case .cashApp: return I18n.tr("payment_method.cash_app")
+        case .ach: return I18n.tr("payment_method.ach")
+        case .custom: return I18n.tr("payment_method.custom")
         }
     }
 
@@ -86,19 +86,19 @@ enum InvoicePaymentMethod: String, Codable, CaseIterable, Identifiable {
         case .none:
             return ""
         case .zelle:
-            return "Email or phone for Zelle"
+            return I18n.tr("payment_details.zelle")
         case .check:
             return ""
         case .stripe:
             return ""
         case .venmo:
-            return "@username or payment handle"
+            return I18n.tr("payment_details.venmo")
         case .cashApp:
-            return "$cashtag"
+            return I18n.tr("payment_details.cash_app")
         case .ach:
-            return "Bank name, routing/account (or instructions)"
+            return I18n.tr("payment_details.ach")
         case .custom:
-            return "Describe how the client should pay"
+            return I18n.tr("payment_details.custom")
         }
     }
 
@@ -127,6 +127,10 @@ struct InvoicePaymentInfo: Codable, Equatable {
     }
 
     var pdfLines: [String] {
+        pdfLines(language: .english)
+    }
+
+    func pdfLines(language: InvoiceContentLanguage) -> [String] {
         switch method {
         case .zelle:
             if let details, !details.isEmpty {
@@ -135,11 +139,16 @@ struct InvoicePaymentInfo: Codable, Equatable {
             return ["Zelle"]
         case .check:
             if let mailingAddress, !mailingAddress.isEmpty {
-                return ["Check by mail:", mailingAddress]
+                let title = (language == .spanish) ? "Cheque por correo:" : "Check by mail:"
+                return [title, mailingAddress]
             }
-            return ["Check by mail"]
+            return [(language == .spanish) ? "Cheque por correo" : "Check by mail"]
         case .stripe:
-            return ["Stripe payment link will be included when sending."]
+            return [
+                (language == .spanish)
+                    ? "El enlace de pago de Stripe se incluira al enviar."
+                    : "Stripe payment link will be included when sending."
+            ]
         default:
             if let details, !details.isEmpty {
                 return ["\(method.title): \(details)"]
@@ -150,63 +159,73 @@ struct InvoicePaymentInfo: Codable, Equatable {
 }
 
 enum InvoiceNotesCodec {
-    private static let marker = "[IA_PAYMENT_META_V1]"
+    private static let paymentMarker = "[IA_PAYMENT_META_V1]"
+    private static let languageMarker = "[IA_LANGUAGE_META_V1]"
 
-    static func compose(userNotes: String, payment: InvoicePaymentInfo?) -> String? {
+    static func compose(
+        userNotes: String,
+        payment: InvoicePaymentInfo?,
+        invoiceLanguage: InvoiceContentLanguage = .english
+    ) -> String? {
         let cleanNotes = trimmedOrNil(userNotes)
         let cleanPayment = normalizedPayment(payment)
+        let languageMeta: String? = (invoiceLanguage == .english)
+            ? nil
+            : (languageMarker + invoiceLanguage.rawValue)
 
-        if cleanNotes == nil && cleanPayment == nil {
+        if cleanNotes == nil && cleanPayment == nil && languageMeta == nil {
             return nil
         }
 
-        guard let cleanPayment else {
-            return cleanNotes
-        }
-
-        let encodedPayment: String? = {
+        let paymentBlock: String? = {
+            guard let cleanPayment else { return nil }
             do {
                 let data = try JSONEncoder().encode(cleanPayment)
-                return data.base64EncodedString()
+                return paymentMarker + data.base64EncodedString()
             } catch {
                 return nil
             }
         }()
 
-        guard let encodedPayment else {
-            return cleanNotes
-        }
-
-        let paymentBlock = marker + encodedPayment
-        if let cleanNotes {
-            return cleanNotes + "\n\n" + paymentBlock
-        }
-        return paymentBlock
+        return [cleanNotes, languageMeta, paymentBlock]
+            .compactMap { $0?.trimmedNonEmpty }
+            .joined(separator: "\n\n")
+            .trimmedNonEmpty
     }
 
-    static func extract(from storedNotes: String?) -> (userNotes: String?, payment: InvoicePaymentInfo?) {
+    static func extract(
+        from storedNotes: String?
+    ) -> (userNotes: String?, payment: InvoicePaymentInfo?, invoiceLanguage: InvoiceContentLanguage?) {
         guard let storedNotes, !storedNotes.isEmpty else {
-            return (nil, nil)
+            return (nil, nil, nil)
         }
 
-        guard let markerRange = storedNotes.range(of: marker) else {
-            return (trimmedOrNil(storedNotes), nil)
+        var notesBlock = storedNotes
+        var decodedPayment: InvoicePaymentInfo?
+
+        if let markerRange = storedNotes.range(of: paymentMarker) {
+            notesBlock = String(storedNotes[..<markerRange.lowerBound])
+            let encodedPart = String(storedNotes[markerRange.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let data = Data(base64Encoded: encodedPart) {
+                decodedPayment = try? JSONDecoder().decode(InvoicePaymentInfo.self, from: data)
+            }
         }
 
-        let userNotesPart = String(storedNotes[..<markerRange.lowerBound])
-        let userNotes = trimmedOrNil(userNotesPart)
-
-        let encodedPart = String(storedNotes[markerRange.upperBound...])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard
-            let data = Data(base64Encoded: encodedPart),
-            let decoded = try? JSONDecoder().decode(InvoicePaymentInfo.self, from: data)
-        else {
-            return (userNotes, nil)
+        var invoiceLanguage: InvoiceContentLanguage?
+        var userNotesPart = notesBlock
+        if let languageRange = notesBlock.range(of: languageMarker) {
+            let rawLanguage = String(notesBlock[languageRange.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            invoiceLanguage = InvoiceContentLanguage(rawValue: rawLanguage)
+            userNotesPart = String(notesBlock[..<languageRange.lowerBound])
         }
 
-        return (userNotes, normalizedPayment(decoded))
+        return (
+            trimmedOrNil(userNotesPart),
+            normalizedPayment(decodedPayment),
+            invoiceLanguage
+        )
     }
 
     private static func normalizedPayment(_ payment: InvoicePaymentInfo?) -> InvoicePaymentInfo? {
@@ -233,6 +252,13 @@ enum InvoiceNotesCodec {
     private static func trimmedOrNil(_ text: String?) -> String? {
         guard let text else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private extension String {
+    var trimmedNonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 }

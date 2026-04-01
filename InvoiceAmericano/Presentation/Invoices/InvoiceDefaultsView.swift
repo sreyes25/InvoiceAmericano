@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct InvoiceDefaultsView: View {
+    @AppStorage(InvoiceContentLanguage.storageKey) private var defaultInvoiceLanguageCode: String = InvoiceContentLanguage.defaultRawValue
     @State private var taxRate: String = "0"           // as string for TextField
     @State private var dueDays: String = "30"          // e.g., Net 30
     @State private var terms: String = "Net 30"
@@ -54,6 +55,15 @@ struct InvoiceDefaultsView: View {
                             TextField("0", text: $taxRate)
                                 .keyboardType(.decimalPad)
                                 .submitLabel(.done)
+                        }
+
+                        FieldRow(label: "Invoice language") {
+                            Picker("Invoice language", selection: $defaultInvoiceLanguageCode) {
+                                ForEach(InvoiceContentLanguage.allCases) { language in
+                                    Text(language.menuTitle).tag(language.rawValue)
+                                }
+                            }
+                            .pickerStyle(.segmented)
                         }
                     }
                 }

@@ -88,7 +88,7 @@ struct ClientListView: View {
                     .font(.headline)
                 Spacer()
                 if !clients.isEmpty {
-                    Text("\(filtered.count) shown")
+                    Text(I18n.tr("clients.count_shown", filtered.count))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }

@@ -93,9 +93,9 @@ final class AuthViewModel: ObservableObject {
 
         AnalyticsService.track(.authSignUpStarted, metadata: ["method": "password"])
 
-        await run("Sign up failed") { [self] in
+        await run(I18n.tr("auth.error.signup_failed")) { [self] in
             try await AuthService.signUp(email: self.normalizedEmail, password: self.password)
-            self.banner = "Check your email to confirm your account."
+            self.banner = I18n.tr("auth.banner.check_email")
             NotificationCenter.default.post(name: .authDidChange, object: nil)
             AnalyticsService.track(.authSignUpSucceeded, metadata: ["method": "password"])
         }
@@ -109,7 +109,7 @@ final class AuthViewModel: ObservableObject {
 
         AnalyticsService.track(.authSignInStarted, metadata: ["method": "password"])
 
-        await run("Sign in failed") { [self] in
+        await run(I18n.tr("auth.error.signin_failed")) { [self] in
             try await AuthService.signIn(email: self.normalizedEmail, password: self.password)
             // Broadcast and refresh local auth state
             NotificationCenter.default.post(name: .authDidChange, object: nil)
@@ -123,7 +123,7 @@ final class AuthViewModel: ObservableObject {
     func signInWithApple() async {
         guard gateAction() else { return }
         AnalyticsService.track(.authSignInStarted, metadata: ["method": "apple"])
-        await run("Apple sign-in failed") { [self] in
+        await run(I18n.tr("auth.error.apple_failed")) { [self] in
             try await AuthService.signInWithApple()
             // Broadcast and refresh local auth state
             NotificationCenter.default.post(name: .authDidChange, object: nil)
@@ -134,7 +134,7 @@ final class AuthViewModel: ObservableObject {
 
     func signOut() async {
         guard gateAction() else { return }
-        await run("Sign out failed") { [self] in
+        await run(I18n.tr("auth.error.signout_failed")) { [self] in
             try await AuthService.signOut()
             self.isAuthed = false
             AnalyticsService.track(.authSignedOut)
@@ -158,14 +158,14 @@ final class AuthViewModel: ObservableObject {
     func updatePassword(newPassword: String) async {
         let trimmed = newPassword.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            error = "Enter a new password."
+            error = I18n.tr("auth.error.new_password_required")
             return
         }
 
-        await run("Password update failed") { [self] in
+        await run(I18n.tr("auth.error.password_update_failed")) { [self] in
             let attrs = UserAttributes(password: trimmed)
             _ = try await SupabaseManager.shared.client.auth.update(user: attrs)
-            self.banner = "Password updated successfully."
+            self.banner = I18n.tr("auth.banner.password_updated")
         }
     }
 
@@ -181,7 +181,7 @@ final class AuthViewModel: ObservableObject {
     }
 
     func refreshSession() async {
-        await run("Session refresh failed", swallowError: true) { [self] in
+        await run(I18n.tr("auth.error.session_refresh_failed"), swallowError: true) { [self] in
             self.isAuthed = (AuthService.currentUserIDFast() != nil)
         }
     }
@@ -201,19 +201,19 @@ final class AuthViewModel: ObservableObject {
             // Show inline hints only when user has interacted or tried to submit
             let show = attemptedSubmit || hasEditedEmail
             emailHint = normalizedEmail.isEmpty
-                ? (show ? "Email required" : nil)
-                : (normalizedEmail.isPlausibleEmail ? nil : (show ? "Enter a valid email" : nil))
+                ? (show ? I18n.tr("auth.hint.email_required") : nil)
+                : (normalizedEmail.isPlausibleEmail ? nil : (show ? I18n.tr("auth.hint.email_invalid") : nil))
 
             let showPwd = attemptedSubmit || hasEditedPassword
             passwordHint = password.isEmpty
-                ? (showPwd ? "Password required" : nil)
-                : (forSignUp && strength == .weak ? "Make password stronger" : nil)
+                ? (showPwd ? I18n.tr("auth.hint.password_required") : nil)
+                : (forSignUp && strength == .weak ? I18n.tr("auth.hint.password_stronger") : nil)
 
         case .signIn:
             // Keep it simple; only surface hints if fields are empty on submit
             let show = attemptedSubmit
-            emailHint = normalizedEmail.isEmpty ? (show ? "Email required" : nil) : nil
-            passwordHint = password.isEmpty ? (show ? "Password required" : nil) : nil
+            emailHint = normalizedEmail.isEmpty ? (show ? I18n.tr("auth.hint.email_required") : nil) : nil
+            passwordHint = password.isEmpty ? (show ? I18n.tr("auth.hint.password_required") : nil) : nil
 
         case .chooser:
             emailHint = nil
@@ -273,18 +273,18 @@ final class AuthViewModel: ObservableObject {
     private func mapErrorMessage(default msg: String, _ err: Error) -> String {
         let t = (err as NSError).localizedDescription.lowercased()
         if t.contains("invalid format") || t.contains("unable to validate email address") {
-            return "That email format is invalid. Remove spaces and use a full email like name@domain.com."
+            return I18n.tr("auth.error.email_format_invalid")
         }
         if t.contains("unsupported email") {
-            return "This email/domain is blocked by your Supabase auth settings."
+            return I18n.tr("auth.error.email_blocked")
         }
-        if t.contains("invalid login") || t.contains("invalid credentials") { return "Email or password is incorrect." }
+        if t.contains("invalid login") || t.contains("invalid credentials") { return I18n.tr("auth.error.invalid_credentials") }
         if t.contains("email rate limit") || t.contains("too many requests") || t.contains("too many attempts") || t.contains("rate limit") {
-            return "Too many attempts — try again in a minute."
+            return I18n.tr("auth.error.too_many_attempts")
         }
-        if t.contains("user already registered") || t.contains("already exists") { return "That email is already registered." }
-        if t.contains("password") && t.contains("weak") { return "Password is too weak. Try a longer one with numbers & symbols." }
-        if t.contains("email not confirmed") { return "Please confirm your email, then sign in." }
-        return "\(msg): \(err.localizedDescription)"
+        if t.contains("user already registered") || t.contains("already exists") { return I18n.tr("auth.error.email_registered") }
+        if t.contains("password") && t.contains("weak") { return I18n.tr("auth.error.password_weak") }
+        if t.contains("email not confirmed") { return I18n.tr("auth.error.email_not_confirmed") }
+        return I18n.tr("auth.error.default_with_reason", msg, err.localizedDescription)
     }
 }

@@ -253,7 +253,7 @@ struct BrandingView: View {
                 if let urlStr = branding?.logo_public_url, let u = URL(string: urlStr) { self.existingLogoURL = u }
             }
         } catch {
-            await MainActor.run { errorText = "Failed to load branding. \(error.localizedDescription)" }
+            await MainActor.run { errorText = I18n.tr("branding.error.load_failed", error.localizedDescription) }
         }
     }
 
@@ -335,7 +335,7 @@ struct BrandingView: View {
                 dismiss()
             }
         } catch {
-            let message = "Save failed at \(step). \(error.localizedDescription)"
+            let message = I18n.tr("branding.error.save_failed_step", step, error.localizedDescription)
             await MainActor.run { errorText = message }
         }
     }
@@ -353,7 +353,7 @@ struct BrandingView: View {
                 }
             }
         } catch {
-            await MainActor.run { errorText = "Could not read selected image." }
+            await MainActor.run { errorText = I18n.tr("branding.error.read_image_failed") }
         }
     }
 

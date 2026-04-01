@@ -54,7 +54,7 @@ struct InvoiceListView: View {
 
     private func statusChip(_ s: InvoiceStatus) -> some View {
         let isSelected = (s == status)
-        let title = (s == .all ? "All" : s.rawValue.capitalized)
+        let title = InvoiceStatusLocalizer.title(for: s.rawValue)
         let tint = statusTint(s)
 
         return Button {
@@ -757,7 +757,7 @@ private struct InvoiceRowCell: View {
 private struct StatusChip: View {
     let status: String
     var body: some View {
-        Text(status.capitalized)
+        Text(InvoiceStatusLocalizer.title(for: status))
             .font(.caption2)
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(color.opacity(0.15))

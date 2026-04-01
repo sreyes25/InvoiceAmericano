@@ -19,6 +19,8 @@ import UserNotifications
 /// - If `display_name` is empty, we fall back to a cleaned email prefix or "Your Business".
 struct AccountView: View {
     @Environment(\.openURL) private var openURL
+    @AppStorage(AppLanguage.storageKey) private var appLanguageCode: String = AppLanguage.defaultRawValue
+    @AppStorage(InvoiceContentLanguage.storageKey) private var defaultInvoiceLanguageCode: String = InvoiceContentLanguage.defaultRawValue
     // MARK: - User-facing data
     @State private var businessName: String? = nil      // ← DBA from profiles.display_name
     @State private var email: String = "you@example.com"
@@ -37,9 +39,9 @@ struct AccountView: View {
     @State private var stripeLoading: Bool = false
 
     // Notifications debug
-    @State private var notificationPermissionLabel: String = "Checking…"
+    @State private var notificationPermissionLabel: String = I18n.tr("stripe.checking")
     @State private var hasAPNSToken: Bool = false
-    @State private var lastAPNSSyncStatus: String = "Not synced"
+    @State private var lastAPNSSyncStatus: String = I18n.tr("account.notifications.not_synced")
     @State private var lastAPNSSyncDate: Date? = nil
     @State private var requestingPush: Bool = false
 
@@ -64,9 +66,10 @@ struct AccountView: View {
     private var accountType: String {
         let n = shownDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let bizHints = [" llc", " inc", " corp", " co", " ltd", " company", " pllc", " pc", " studios", " group"]
-        if n == "your business" { return "Business" }
-        if bizHints.contains(where: { n.contains($0) }) { return "Business" }
-        return "Personal"
+        let fallback = I18n.tr("account.fallback.business_name").lowercased()
+        if n == fallback || n == "your business" { return I18n.tr("account.type.business") }
+        if bizHints.contains(where: { n.contains($0) }) { return I18n.tr("account.type.business") }
+        return I18n.tr("account.type.personal")
     }
 
     // MARK: - Body
@@ -323,7 +326,7 @@ struct AccountView: View {
     // MARK: - Stripe computed labels
     private var stripePrimaryTitle: String {
         let connected = stripeStatus?.connected ?? false
-        return connected ? "Stripe Connected" : "Connect with Stripe"
+        return connected ? I18n.tr("stripe.connected") : I18n.tr("stripe.connect_cta")
     }
     private var stripePrimaryIcon: String {
         let connected = stripeStatus?.connected ?? false
@@ -333,20 +336,20 @@ struct AccountView: View {
         if let s = stripeStatus {
             if s.connected == true {
                 let ready = (s.details_submitted == true && s.charges_enabled == true && s.payouts_enabled == true)
-                return ready ? "Ready: charges & payouts enabled" : "Connected — finish verification to enable payouts"
+                return ready ? I18n.tr("stripe.ready") : I18n.tr("stripe.finish_verification")
             } else {
-                return "Optional: connect when you want to accept card payments"
+                return I18n.tr("stripe.optional_connect")
             }
         }
-        return "Optional: connect when you want to accept card payments"
+        return I18n.tr("stripe.optional_connect")
     }
     private var stripeStateLabel: String {
         if let s = stripeStatus {
-            if !s.connected { return "Available" }
+            if !s.connected { return I18n.tr("stripe.available") }
             let ready = (s.details_submitted == true && s.charges_enabled == true && s.payouts_enabled == true)
-            return ready ? "Active" : "Optional"
+            return ready ? I18n.tr("stripe.active") : I18n.tr("stripe.optional")
         }
-        return "Checking…"
+        return I18n.tr("stripe.checking")
     }
     private var stripeStateColor: Color {
         if let s = stripeStatus {
@@ -375,7 +378,7 @@ struct AccountView: View {
             if let status {
                 self.stripeStatus = status
             } else if self.stripeStatus == nil {
-                self.errorText = self.errorText ?? "You’re offline. Stripe status may be out of date."
+                self.errorText = self.errorText ?? I18n.tr("stripe.offline_status_may_be_outdated")
             }
             self.stripeLoading = false
         }
@@ -410,16 +413,16 @@ struct AccountView: View {
     private var summaryCards: some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
-                SummaryStatCard(title: "Invoices",
+                SummaryStatCard(title: I18n.tr("tab.invoices"),
                                 value: "\(totalInvoices)",
                                 systemImage: "doc.on.doc",
                                 gradient: blueGrad)
-                SummaryStatCard(title: "Paid",
+                SummaryStatCard(title: I18n.tr("status.paid"),
                                 value: "\(paidInvoices)",
                                 systemImage: "checkmark.seal.fill",
                                 gradient: greenGrad)
             }
-            SummaryStatCardLarge(title: "Outstanding Balance",
+            SummaryStatCardLarge(title: I18n.tr("account.outstanding_balance"),
                                  value: currency(outstanding),
                                  systemImage: "clock.badge",
                                  gradient: orangeGrad)
@@ -514,8 +517,8 @@ struct AccountView: View {
                 })
             } label: {
                 ActionCard(icon: "paintbrush",
-                           title: "Branding",
-                           subtitle: "Logo & business details",
+                           title: I18n.tr("account.branding"),
+                           subtitle: I18n.tr("account.branding_subtitle"),
                            gradient: blueGrad)
             }
             .buttonStyle(.plain)
@@ -524,8 +527,8 @@ struct AccountView: View {
                 InvoiceDefaultsView()
             } label: {
                 ActionCard(icon: "doc.plaintext",
-                           title: "Invoice defaults",
-                           subtitle: "Terms, notes, tax",
+                           title: I18n.tr("invoice.defaults.title"),
+                           subtitle: I18n.tr("invoice.defaults.subtitle"),
                            gradient: greenGrad)
             }
             .buttonStyle(.plain)
@@ -534,11 +537,48 @@ struct AccountView: View {
 
     private var settingsList: some View {
         VStack(spacing: 12) {
+            languageSettingsCard
             notificationToggleCard
             //notificationsDebugCard // Debug Notifications 
             supportCard
             privacyCard
         }
+    }
+
+    private var languageSettingsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Language", systemImage: "globe")
+                .font(.subheadline.weight(.semibold))
+
+            HStack {
+                Text("App")
+                Spacer()
+                Picker("App language", selection: $appLanguageCode) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.menuTitle).tag(language.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+
+            HStack {
+                Text("Invoices")
+                Spacer()
+                Picker("Default invoice language", selection: $defaultInvoiceLanguageCode) {
+                    ForEach(InvoiceContentLanguage.allCases) { language in
+                        Text(language.menuTitle).tag(language.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+
+            Text("Set UI language and the default language for new invoices.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.black.opacity(0.05)))
     }
 
     private var notificationToggleCard: some View {
@@ -565,11 +605,11 @@ struct AccountView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Permission: \(notificationPermissionLabel)")
-                Text("APNs token saved: \(hasAPNSToken ? "Yes" : "No")")
-                Text("Last sync: \(statusLabel(status: lastAPNSSyncStatus))")
+                Text(I18n.tr("account.notifications.permission", notificationPermissionLabel))
+                Text(I18n.tr("account.notifications.apns_token_saved", hasAPNSToken ? I18n.tr("Yes") : I18n.tr("No")))
+                Text(I18n.tr("account.notifications.last_sync", statusLabel(status: lastAPNSSyncStatus)))
                 if let lastAPNSSyncDate {
-                    Text("Updated: \(formatted(date: lastAPNSSyncDate))")
+                    Text(I18n.tr("account.notifications.updated", formatted(date: lastAPNSSyncDate)))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -577,7 +617,7 @@ struct AccountView: View {
             .foregroundStyle(.secondary)
 
             HStack {
-                Button(requestingPush ? "Requesting…" : "Request permission") {
+                Button(requestingPush ? I18n.tr("Requesting…") : I18n.tr("account.notifications.request_permission")) {
                     Task { await requestPushPermissions() }
                 }
                 .buttonStyle(.bordered)
@@ -671,9 +711,9 @@ struct AccountView: View {
             let base = email[..<at]
             let cleaned = base.replacingOccurrences(of: ".", with: " ")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return cleaned.isEmpty ? "Your Business" : cleaned.capitalized
+            return cleaned.isEmpty ? I18n.tr("account.fallback.business_name") : cleaned.capitalized
         }
-        return "Your Business"
+        return I18n.tr("account.fallback.business_name")
     }
 
     private func refreshNotificationDebug() async {
@@ -684,7 +724,7 @@ struct AccountView: View {
         await MainActor.run {
             self.notificationPermissionLabel = permissionLabel(for: permission)
             self.hasAPNSToken = !(token ?? "").isEmpty
-            self.lastAPNSSyncStatus = summary.status ?? "Not synced"
+            self.lastAPNSSyncStatus = summary.status ?? I18n.tr("account.notifications.not_synced")
             self.lastAPNSSyncDate = summary.date
         }
     }
@@ -708,7 +748,7 @@ struct AccountView: View {
     }
 
     private func openSupportEmail() {
-        let subject = "InvoiceAmericano Support"
+        let subject = I18n.tr("account.support.subject")
         let mailto = "mailto:\(AppSupport.supportEmail)?subject=\(subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? subject)"
         if let url = URL(string: mailto) {
             openURL(url)
@@ -723,18 +763,18 @@ struct AccountView: View {
     }
 
     private func statusLabel(status: String) -> String {
-        if status.isEmpty { return "Not synced" }
+        if status.isEmpty { return I18n.tr("account.notifications.not_synced") }
         return status
     }
 
     private func permissionLabel(for status: UNAuthorizationStatus) -> String {
         switch status {
-        case .authorized: return "Authorized"
-        case .denied: return "Denied"
-        case .provisional: return "Provisional"
-        case .ephemeral: return "Ephemeral"
-        case .notDetermined: return "Not determined"
-        @unknown default: return "Unknown"
+        case .authorized: return I18n.tr("account.permission.authorized")
+        case .denied: return I18n.tr("account.permission.denied")
+        case .provisional: return I18n.tr("account.permission.provisional")
+        case .ephemeral: return I18n.tr("account.permission.ephemeral")
+        case .notDetermined: return I18n.tr("account.permission.not_determined")
+        @unknown default: return I18n.tr("account.permission.unknown")
         }
     }
 
@@ -814,7 +854,7 @@ struct AccountDetailsView: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text(currentName).font(.headline)
-                        Text("User ID: \(uid)")
+                        Text(I18n.tr("account.user_id", uid))
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .textSelection(.enabled)
@@ -959,9 +999,10 @@ struct AccountDetailsView: View {
     private func accountTypeFrom(displayName: String) -> String {
         let n = displayName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let bizHints = [" llc", " inc", " corp", " co", " ltd", " company", " pllc", " pc", " studios", " group"]
-        if n == "your business" { return "Business" }
-        if bizHints.contains(where: { n.contains($0) }) { return "Business" }
-        return "Personal"
+        let fallback = I18n.tr("account.fallback.business_name").lowercased()
+        if n == fallback || n == "your business" { return I18n.tr("account.type.business") }
+        if bizHints.contains(where: { n.contains($0) }) { return I18n.tr("account.type.business") }
+        return I18n.tr("account.type.personal")
     }
 
     // MARK: - Persist the single source of truth (profiles.display_name)

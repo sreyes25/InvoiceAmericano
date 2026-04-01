@@ -1,0 +1,188 @@
+/* App-level i18n keys (English) */
+"status.all" = "All";
+"status.open" = "Open";
+"status.sent" = "Sent";
+"status.paid" = "Paid";
+"status.overdue" = "Overdue";
+
+"payment_method.none" = "None";
+"payment_method.zelle" = "Zelle";
+"payment_method.check" = "Check";
+"payment_method.stripe" = "Stripe payment link";
+"payment_method.venmo" = "Venmo";
+"payment_method.cash_app" = "Cash App";
+"payment_method.ach" = "Bank Transfer (ACH)";
+"payment_method.custom" = "Other";
+
+"payment_details.zelle" = "Email or phone for Zelle";
+"payment_details.venmo" = "@username or payment handle";
+"payment_details.cash_app" = "$cashtag";
+"payment_details.ach" = "Bank name, routing/account (or instructions)";
+"payment_details.custom" = "Describe how the client should pay";
+
+"auth.error.signup_failed" = "Sign up failed";
+"auth.error.signin_failed" = "Sign in failed";
+"auth.error.apple_failed" = "Apple sign-in failed";
+"auth.error.signout_failed" = "Sign out failed";
+"auth.error.new_password_required" = "Enter a new password.";
+"auth.error.password_update_failed" = "Password update failed";
+"auth.error.session_refresh_failed" = "Session refresh failed";
+"auth.error.email_format_invalid" = "That email format is invalid. Remove spaces and use a full email like name@domain.com.";
+"auth.error.email_blocked" = "This email/domain is blocked by your Supabase auth settings.";
+"auth.error.invalid_credentials" = "Email or password is incorrect.";
+"auth.error.too_many_attempts" = "Too many attempts — try again in a minute.";
+"auth.error.email_registered" = "That email is already registered.";
+"auth.error.password_weak" = "Password is too weak. Try a longer one with numbers & symbols.";
+"auth.error.email_not_confirmed" = "Please confirm your email, then sign in.";
+"auth.error.default_with_reason" = "%@: %@";
+
+"auth.banner.check_email" = "Check your email to confirm your account.";
+"auth.banner.password_updated" = "Password updated successfully.";
+
+"auth.hint.email_required" = "Email required";
+"auth.hint.email_invalid" = "Enter a valid email";
+"auth.hint.password_required" = "Password required";
+"auth.hint.password_stronger" = "Make password stronger";
+
+"auth.password_strength" = "Strength: %@";
+"auth.strength.weak" = "Weak";
+"auth.strength.ok" = "Okay";
+"auth.strength.strong" = "Strong";
+
+"auth.reset.both_required" = "Both password fields are required.";
+"auth.reset.min_length" = "Password must be at least 8 characters.";
+"auth.reset.no_match" = "Passwords do not match.";
+
+"error.offline_retry" = "You’re offline. Check your connection and try again.";
+
+"stripe.connected" = "Stripe Connected";
+"stripe.connect_cta" = "Connect with Stripe";
+"stripe.ready" = "Ready: charges & payouts enabled";
+"stripe.finish_verification" = "Connected — finish verification to enable payouts";
+"stripe.optional_connect" = "Optional: connect when you want to accept card payments";
+"stripe.available" = "Available";
+"stripe.active" = "Active";
+"stripe.optional" = "Optional";
+"stripe.connect" = "Connect";
+"stripe.checking" = "Checking…";
+"stripe.offline_status_may_be_outdated" = "You’re offline. Stripe status may be out of date.";
+
+"account.type.business" = "Business";
+"account.type.personal" = "Personal";
+"account.outstanding_balance" = "Outstanding Balance";
+"account.branding" = "Branding";
+"account.branding_subtitle" = "Logo & business details";
+
+"invoice.defaults.title" = "Invoice defaults";
+"invoice.defaults.subtitle" = "Terms, notes, tax";
+
+"invoice.status_description.open" = "Invoice created";
+"invoice.status_description.sent" = "Invoice link sent to client";
+"invoice.status_description.paid" = "Client paid invoice in full";
+"invoice.status_description.overdue" = "Due date passed and invoice is unpaid";
+"invoice.processing_fee.generic" = "When you include a payment link, your client will pay the invoice total plus a $1 processing fee.";
+"invoice.processing_fee.with_number" = "When you include a payment link, your client will pay invoice #%@ plus a $1 processing fee.";
+
+"activity.created" = "Created";
+"activity.opened" = "Opened";
+"activity.due_soon" = "Due Soon";
+"activity.archived" = "Archived";
+"activity.deleted" = "Deleted";
+"activity.client_fallback" = "Client";
+"activity.unread" = "Unread";
+
+"tab.invoices" = "Invoices";
+
+"home.share.pay_invoice" = "Pay this invoice";
+"home.stripe.connect_to_accept" = "Connect to accept payments";
+"home.badge.unread" = "%@ unread";
+"home.sheet.empty.invoices_filter" = "No invoices for this filter yet";
+"home.sheet.empty.activity_filter" = "No activity for this filter yet";
+"home.sheet.empty.search_results" = "No results for \"%@\"";
+"home.day.today" = "Today";
+"home.day.yesterday" = "Yesterday";
+"home.activity.title.who_suffix" = " (%@)";
+"home.activity.title.format" = "Invoice %@ - %@%@";
+
+"invoice.new.preset.service_call" = "Service call";
+"invoice.new.preset.labor_hour" = "Labor hour";
+"invoice.new.preset.materials" = "Materials";
+"invoice.new.preset.cleanup" = "Cleanup";
+
+"invoice.new.preview.line.invoice_number" = "Invoice #: %@";
+"invoice.new.preview.line.due_date" = "Due: %@";
+"invoice.new.preview.line.tax_percent" = "Tax: %@%%";
+"invoice.new.preview.line.language" = "Language: %@";
+"invoice.new.preview.line.payment" = "Payment: %@";
+"invoice.new.preview.item.fallback" = "Item %d";
+"invoice.new.preview.item.quantity" = "Qty: %d";
+
+"invoice.new.notes.preview.empty" = "Add a note";
+"invoice.new.payment.preview.empty" = "Select a method";
+
+"invoice.new.accessibility.client" = "Client %@";
+"invoice.new.accessibility.no_client" = "No client selected. Tap to choose a client.";
+"invoice.new.accessibility.due_date" = "Due date %@";
+"invoice.new.accessibility.invoice_number_unknown" = "unknown";
+"invoice.new.accessibility.invoice_details.base" = "Due date %@. Invoice number %@.";
+"invoice.new.accessibility.invoice_details.tax" = "Tax %@ percent amount %@.";
+"invoice.new.accessibility.notes.empty" = "Notes. Add a note.";
+"invoice.new.accessibility.notes.value" = "Notes. %@";
+"invoice.new.accessibility.payment.empty" = "Payment method. Select a method.";
+"invoice.new.accessibility.payment.value" = "Payment method. %@";
+
+"invoice.new.item.field" = "Item";
+"invoice.new.item.hint.title_optional" = "Title (optional)";
+"invoice.new.item.description" = "Description";
+"invoice.new.item.hint.description_optional" = "Describe the work (optional)";
+"invoice.new.item.add_title" = "Add title";
+"invoice.new.item.add_description" = "Add description";
+
+"account.notifications.not_synced" = "Not synced";
+"account.notifications.permission" = "Permission: %@";
+"account.notifications.apns_token_saved" = "APNs token saved: %@";
+"account.notifications.last_sync" = "Last sync: %@";
+"account.notifications.updated" = "Updated: %@";
+"account.notifications.request_permission" = "Request permission";
+"account.permission.authorized" = "Authorized";
+"account.permission.denied" = "Denied";
+"account.permission.provisional" = "Provisional";
+"account.permission.ephemeral" = "Ephemeral";
+"account.permission.not_determined" = "Not determined";
+"account.permission.unknown" = "Unknown";
+"account.support.subject" = "InvoiceAmericano Support";
+"account.fallback.business_name" = "Your Business";
+"account.user_id" = "User ID: %@";
+
+"branding.error.load_failed" = "Failed to load branding. %@";
+"branding.error.save_failed_step" = "Save failed at %@. %@";
+"branding.error.read_image_failed" = "Could not read selected image.";
+
+"clients.avatar_accessibility" = "Client avatar: %@";
+"clients.error.invalid_email" = "Please enter a valid email.";
+
+"Business Info" = "Business Info";
+"Logo" = "Logo";
+"Accent Color" = "Accent Color";
+"Save Branding" = "Save Branding";
+"Edit Client" = "Edit Client";
+"Full Name" = "Full Name";
+"Required" = "Required";
+"Street" = "Street";
+"New Client" = "New Client";
+"Name" = "Name";
+"Phone" = "Phone";
+"Street address" = "Street address";
+"City" = "City";
+"State" = "State";
+"ZIP" = "ZIP";
+"Not synced" = "Not synced";
+"Request permission" = "Request permission";
+"Account Deletion Failed" = "Account Deletion Failed";
+"User ID: %@" = "User ID: %@";
+
+"clients.count_shown" = "%d shown";
+"Notifications status" = "Notifications status";
+"Sync token" = "Sync token";
+"AI logo uses your business name, tagline, industry/theme choices, and brand color automatically." = "AI logo uses your business name, tagline, industry/theme choices, and brand color automatically.";
+"Requesting…" = "Requesting…";

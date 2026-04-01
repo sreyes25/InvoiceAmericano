@@ -195,7 +195,7 @@ struct ActivityAllView: View {
 
             // LEFT: Client name + invoice number
             VStack(alignment: .leading, spacing: 4) {
-                Text(row.clientName.isEmpty || row.clientName == "—" ? "Client" : row.clientName)
+                Text(row.clientName.isEmpty || row.clientName == "—" ? I18n.tr("activity.client_fallback") : row.clientName)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
                 Text(row.invoiceNumber)
@@ -226,7 +226,7 @@ struct ActivityAllView: View {
                 Circle()
                     .fill(Color.primary.opacity(0.65))
                     .frame(width: 8, height: 8)
-                    .accessibilityLabel("Unread")
+                    .accessibilityLabel(I18n.tr("activity.unread"))
             }
         }
         .contentShape(Rectangle())
@@ -234,17 +234,7 @@ struct ActivityAllView: View {
 
     // MARK: - Event helpers (badge label & color)
     private func eventLabel(for event: String) -> String {
-        switch event {
-        case "created":  return "Created"
-        case "sent":     return "Sent"
-        case "opened":   return "Opened"
-        case "paid":     return "Paid"
-        case "archived": return "Archived"
-        case "deleted":  return "Deleted"
-        case "overdue":  return "Overdue"
-        case "due_soon": return "Due Soon"
-        default:           return event.capitalized
-        }
+        ActivityEventLocalizer.title(for: event)
     }
 
     private func eventColor(for event: String) -> Color {
@@ -321,8 +311,8 @@ struct ActivityAllView: View {
         f.dateFormat = "yyyy-MM-dd"
         guard let d = f.date(from: key) else { return key }
 
-        if Calendar.current.isDateInToday(d) { return "Today" }
-        if Calendar.current.isDateInYesterday(d) { return "Yesterday" }
+        if Calendar.current.isDateInToday(d) { return I18n.tr("home.day.today") }
+        if Calendar.current.isDateInYesterday(d) { return I18n.tr("home.day.yesterday") }
 
         let out = DateFormatter()
         out.dateStyle = .medium

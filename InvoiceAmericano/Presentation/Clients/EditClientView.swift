@@ -218,7 +218,7 @@ struct EditClientView: View {
         // minimal email sanity check
         if !trimmedEmail.isEmpty, !(trimmedEmail.contains("@") && trimmedEmail.contains(".")) {
             await MainActor.run {
-                self.error = "Please enter a valid email."
+                self.error = I18n.tr("clients.error.invalid_email")
                 self.isSaving = false
                 self.focused = .email
             }

@@ -17,13 +17,13 @@ struct ResetPasswordView: View {
 
     private var validationMessage: String? {
         if newPassword.isEmpty || confirmPassword.isEmpty {
-            return attemptedSubmit ? "Both password fields are required." : nil
+            return attemptedSubmit ? I18n.tr("auth.reset.both_required") : nil
         }
         if newPassword.count < 8 {
-            return "Password must be at least 8 characters."
+            return I18n.tr("auth.reset.min_length")
         }
         if newPassword != confirmPassword {
-            return "Passwords do not match."
+            return I18n.tr("auth.reset.no_match")
         }
         return nil
     }

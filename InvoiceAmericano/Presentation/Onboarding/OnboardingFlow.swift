@@ -34,6 +34,8 @@ private struct OnboardingBrandingRow: Decodable {
 struct OnboardingFlow: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
+    @AppStorage(AppLanguage.storageKey) private var appLanguageCode: String = AppLanguage.defaultRawValue
+    @AppStorage(InvoiceContentLanguage.storageKey) private var defaultInvoiceLanguageCode: String = InvoiceContentLanguage.defaultRawValue
 
     @State private var step: Step = .welcome
     @State private var isSaving = false
@@ -59,6 +61,7 @@ struct OnboardingFlow: View {
 
     enum Step: Hashable {
         case welcome
+        case language
         case notifications
         case branding
         case invoiceDefaults
@@ -91,7 +94,14 @@ struct OnboardingFlow: View {
 
                             switch step {
                             case .welcome:
-                                WelcomeStep { withAnimation(.snappy(duration: 0.25)) { step = .notifications } }
+                                WelcomeStep { withAnimation(.snappy(duration: 0.25)) { step = .language } }
+
+                            case .language:
+                                LanguageStep(
+                                    appLanguage: appLanguageBinding,
+                                    invoiceLanguage: invoiceLanguageBinding,
+                                    onNext: { withAnimation(.snappy(duration: 0.25)) { step = .notifications } }
+                                )
 
                             case .notifications:
                                 NotificationsStep { enabled in
@@ -166,22 +176,46 @@ struct OnboardingFlow: View {
         }
     }
 
-    private var totalStepCount: Int { 6 }
+    private var totalStepCount: Int { 7 }
+
+    private var appLanguage: AppLanguage {
+        AppLanguage(rawValue: appLanguageCode) ?? .english
+    }
+
+    private var invoiceLanguage: InvoiceContentLanguage {
+        InvoiceContentLanguage(rawValue: defaultInvoiceLanguageCode) ?? .english
+    }
+
+    private var appLanguageBinding: Binding<AppLanguage> {
+        Binding(
+            get: { AppLanguage(rawValue: appLanguageCode) ?? .english },
+            set: { appLanguageCode = $0.rawValue }
+        )
+    }
+
+    private var invoiceLanguageBinding: Binding<InvoiceContentLanguage> {
+        Binding(
+            get: { InvoiceContentLanguage(rawValue: defaultInvoiceLanguageCode) ?? .english },
+            set: { defaultInvoiceLanguageCode = $0.rawValue }
+        )
+    }
 
     private var stepIndex: Int {
         switch step {
         case .welcome: return 1
-        case .notifications: return 2
-        case .branding: return 3
-        case .invoiceDefaults: return 4
-        case .stripeConnect: return 5
-        case .done: return 6
+        case .language: return 2
+        case .notifications: return 3
+        case .branding: return 4
+        case .invoiceDefaults: return 5
+        case .stripeConnect: return 6
+        case .done: return 7
         }
     }
 
     private func title(for step: Step) -> String {
         switch step {
         case .welcome: return "Welcome"
+        case .language: return "Language"
         case .notifications: return "Notifications"
         case .branding: return "Branding"
         case .invoiceDefaults: return "Invoice Defaults"
@@ -193,7 +227,8 @@ struct OnboardingFlow: View {
     private func previousStep(from current: Step) -> Step {
         switch current {
         case .welcome: return .welcome
-        case .notifications: return .welcome
+        case .language: return .welcome
+        case .notifications: return .language
         case .branding: return .notifications
         case .invoiceDefaults: return .branding
         case .stripeConnect: return .invoiceDefaults
@@ -319,7 +354,7 @@ struct OnboardingFlow: View {
             let tax = Double(defaultTaxPct) ?? 0
             let trimmedTerms = defaultTerms.trimmingCharacters(in: .whitespacesAndNewlines)
             let footer = defaultNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? defaultFooterTemplate(businessName: cleanName)
+                ? defaultFooterTemplate(businessName: cleanName, language: invoiceLanguage)
                 : defaultNotes
             try await InvoiceDefaultsService.upsertDefaults(
                 taxRate: max(0, tax),
@@ -371,12 +406,8 @@ struct OnboardingFlow: View {
         return 30
     }
 
-    private func defaultFooterTemplate(businessName: String) -> String {
-        let cleanBusiness = businessName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleanBusiness.isEmpty {
-            return "Questions about this invoice? Reach out anytime."
-        }
-        return "Questions about this invoice? Contact \(cleanBusiness)."
+    private func defaultFooterTemplate(businessName: String, language: InvoiceContentLanguage) -> String {
+        language.defaultFooterTemplate(businessName: businessName)
     }
 
     // MARK: - Logout from onboarding
@@ -427,6 +458,58 @@ private struct WelcomeStep: View {
             .buttonStyle(OnboardingPrimaryButtonStyle(tint: .accentColor))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct LanguageStep: View {
+    @Binding var appLanguage: AppLanguage
+    @Binding var invoiceLanguage: InvoiceContentLanguage
+    var onNext: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            labeled("App language") {
+                Picker("App language", selection: $appLanguage) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.menuTitle).tag(language)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            labeled("Default invoice language") {
+                Picker("Default invoice language", selection: $invoiceLanguage) {
+                    ForEach(InvoiceContentLanguage.allCases) { language in
+                        Text(language.menuTitle).tag(language)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            Text("You can change both later from Account. Each invoice can override language before saving.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 8)
+
+            Button(action: onNext) {
+                Text("Continue")
+                    .bold()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+            }
+            .buttonStyle(OnboardingPrimaryButtonStyle(tint: .accentColor))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func labeled(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            content()
+        }
     }
 }
 

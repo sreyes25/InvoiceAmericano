@@ -17,8 +17,13 @@ struct InvoiceAmericanoApp: App {
     @State private var isAuthed = (AuthService.currentUserIDFast() != nil)
     @State private var showOnboarding = false
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding: Bool = false
+    @AppStorage(AppLanguage.storageKey) private var appLanguageCode: String = AppLanguage.defaultRawValue
     @State private var onboardingStatusError: String?
     @State private var didSyncUnreadThisActive = false
+
+    private var appLanguage: AppLanguage {
+        AppLanguage(rawValue: appLanguageCode) ?? .english
+    }
 
     private func recomputeOnboardingFlag() async {
         do {
@@ -90,6 +95,7 @@ struct InvoiceAmericanoApp: App {
             .animation(.snappy(duration: 0.25), value: isAuthed)   // smooth flip between auth states
             .animation(.snappy(duration: 0.25), value: authVM.isInRecoveryFlow)
             .tint(.blue)                                           // global accent to match app theme
+            .environment(\.locale, Locale(identifier: appLanguage.localeIdentifier))
             // Handle email confirmation deep-link
             .onOpenURL { url in
                 let params = url.decodedQueryParameters

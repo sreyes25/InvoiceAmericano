@@ -42,6 +42,7 @@ struct PendingInvoiceCreate: Codable, Identifiable {
     let paymentMethod: InvoicePaymentMethod
     let paymentDetails: String
     let paymentAddress: String
+    let invoiceLanguageCode: String?
     let items: [PendingInvoiceItem]
 }
 
@@ -205,6 +206,7 @@ actor OfflineWriteQueueService {
             paymentMethod: draft.paymentMethod,
             paymentDetails: draft.paymentDetails,
             paymentAddress: draft.paymentAddress,
+            invoiceLanguageCode: draft.invoiceLanguage.rawValue,
             items: draft.items.map { item in
                 PendingInvoiceItem(
                     title: item.title,
@@ -255,6 +257,20 @@ actor OfflineWriteQueueService {
         recent.insert(row, at: 0)
         await saveCachedRecentInvoices(Array(recent.prefix(10)), uid: uid)
 
+        let composedNotes = await MainActor.run { () -> String? in
+            let language = InvoiceContentLanguage(rawValue: op.invoiceLanguageCode ?? "") ?? .english
+            let payment = InvoicePaymentInfo(
+                method: op.paymentMethod,
+                details: op.paymentDetails,
+                mailingAddress: op.paymentAddress
+            )
+            return InvoiceNotesCodec.compose(
+                userNotes: op.notes,
+                payment: payment,
+                invoiceLanguage: language
+            )
+        }
+
         let detail = InvoiceDetail(
             id: op.localInvoiceID,
             number: op.number,
@@ -267,7 +283,7 @@ actor OfflineWriteQueueService {
             issued_at: row.created_at,
             dueDate: row.dueDate,
             checkout_url: nil,
-            notes: op.notes.isEmpty ? nil : op.notes,
+            notes: composedNotes,
             client: ClientRef(name: op.clientName, colorHex: op.clientColorHex),
             line_items: op.items.map { item in
                 LineItemRow(

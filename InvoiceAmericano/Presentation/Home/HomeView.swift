@@ -70,8 +70,8 @@ struct HomeView: View {
     }
 
     private var stripeSectionStatus: String {
-        if stripeStatus == nil { return "Checking…" }
-        return stripeFullyReady ? "Active" : "Connect"
+        if stripeStatus == nil { return I18n.tr("stripe.checking") }
+        return stripeFullyReady ? I18n.tr("stripe.active") : I18n.tr("stripe.connect")
     }
 
     // Sheets
@@ -159,7 +159,7 @@ struct HomeView: View {
         .iaStandardSheetPresentation(detents: [.large])
 
         .sheet(item: $payLinkPayload) { payload in
-            ActivitySheet(items: ["Pay this invoice", payload.url]) { _, _ in
+            ActivitySheet(items: [I18n.tr("home.share.pay_invoice"), payload.url]) { _, _ in
                 payLinkPayload = nil
             }
         }
@@ -324,7 +324,7 @@ struct HomeView: View {
 
     private var stripePrimaryTitle: String {
         let connected = stripeStatus?.connected ?? false
-        return connected ? "Stripe Connected" : "Connect with Stripe"
+        return connected ? I18n.tr("stripe.connected") : I18n.tr("stripe.connect_cta")
     }
 
     private var stripePrimaryIcon: String {
@@ -337,15 +337,15 @@ struct HomeView: View {
             if s.connected == true {
                 let all = [s.details_submitted == true, s.charges_enabled == true, s.payouts_enabled == true]
                 if all.allSatisfy({ $0 }) {
-                    return "Ready: charges & payouts enabled"
+                    return I18n.tr("stripe.ready")
                 } else {
-                    return "Connected — finish verification to enable payouts"
+                    return I18n.tr("stripe.finish_verification")
                 }
             } else {
-                return "Connect to accept payments"
+                return I18n.tr("home.stripe.connect_to_accept")
             }
         }
-        return "Connect to accept payments"
+        return I18n.tr("home.stripe.connect_to_accept")
     }
 
     // Primary tap handler: connect if not connected, otherwise open manage
@@ -414,11 +414,11 @@ struct HomeView: View {
     private var summaryCards: some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
-                SummaryStatCard(title: "Invoices", value: "\(stats?.totalCount ?? 0)", systemImage: "doc.on.doc", tint: .blue)
-                SummaryStatCard(title: "Paid", value: "\(stats?.paidCount ?? 0)", systemImage: "checkmark.seal.fill", tint: .green)
+                SummaryStatCard(title: I18n.tr("Invoices"), value: "\(stats?.totalCount ?? 0)", systemImage: "doc.on.doc", tint: .blue)
+                SummaryStatCard(title: I18n.tr("Paid"), value: "\(stats?.paidCount ?? 0)", systemImage: "checkmark.seal.fill", tint: .green)
             }
             SummaryStatCardLarge(
-                title: "Outstanding Balance",
+                title: I18n.tr("Outstanding Balance"),
                 value: currency(stats?.outstandingAmount ?? 0),
                 systemImage: "clock.badge",
                 tint: .orange
@@ -517,7 +517,7 @@ struct HomeView: View {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     showNewInvoice = true
                 } label: {
-                    QuickActionCard(title: "New",
+                    QuickActionCard(title: I18n.tr("New"),
                                     systemImage: "plus.circle.fill",
                                     colors: [.blue, .indigo])
                                     .scaleEffect(showNewInvoice ? 0.97 : 1.0)
@@ -530,7 +530,7 @@ struct HomeView: View {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     showInvoicesSheet = true
                 } label: {
-                    QuickActionCard(title: "Invoices",
+                    QuickActionCard(title: I18n.tr("Invoices"),
                                     systemImage: "doc.plaintext.fill",
                                     colors: [.green, .teal])
                 }
@@ -542,7 +542,7 @@ struct HomeView: View {
                     showActivitySheet = true
                 } label: {
                     ZStack(alignment: .topTrailing) {
-                        QuickActionCard(title: "Activity",
+                        QuickActionCard(title: I18n.tr("Activity"),
                                         systemImage: "bell.badge.fill",
                                         colors: [.purple, .pink])
                         if unreadCount > 0 {
@@ -738,7 +738,6 @@ struct HomeView: View {
     }
 
     private func relativeTime(_ iso: String) -> String {
-        // Try ISO with/without fractional seconds; fallback to yyyy-MM-dd
         let isoNoFS = ISO8601DateFormatter()
         isoNoFS.formatOptions = [.withInternetDateTime]
         let isoFS = ISO8601DateFormatter()
@@ -748,11 +747,9 @@ struct HomeView: View {
         ymd.timeZone = TimeZone(secondsFromGMT: 0)
 
         let d = isoNoFS.date(from: iso) ?? isoFS.date(from: iso) ?? ymd.date(from: iso) ?? Date()
-        let comps = Calendar.current.dateComponents([.minute,.hour,.day], from: d, to: Date())
-        if let day = comps.day, day > 0 { return "\(day)d ago" }
-        if let hour = comps.hour, hour > 0 { return "\(hour)h ago" }
-        if let min = comps.minute, min > 0 { return "\(min)m ago" }
-        return "just now"
+        let r = RelativeDateTimeFormatter()
+        r.unitsStyle = .short
+        return r.localizedString(for: d, relativeTo: Date())
     }
 
     private func icon(for event: String) -> String {
@@ -768,12 +765,9 @@ struct HomeView: View {
     private func activityTitle(_ a: ActivityJoined) -> String {
         let inv = a.invoiceNumber
         let who = a.clientName
-        switch a.event.lowercased() {
-        case "paid":    return "Invoice \(inv) — Paid\(who == "—" ? "" : " (\(who))")"
-        case "sent":    return "Invoice \(inv) — Sent\(who == "—" ? "" : " (\(who))")"
-        case "created": return "Invoice \(inv) — Created\(who == "—" ? "" : " (\(who))")"
-        default:        return "Invoice \(inv) — \(a.event.capitalized)\(who == "—" ? "" : " (\(who))")"
-        }
+        let whoSuffix = who == "—" ? "" : I18n.tr("home.activity.title.who_suffix", who)
+        let eventTitle = ActivityEventLocalizer.title(for: a.event)
+        return I18n.tr("home.activity.title.format", inv, eventTitle, whoSuffix)
     }
 }
 
@@ -828,7 +822,7 @@ private struct UnreadBadge: View {
             .padding(.vertical, 4)
             .background(Capsule().fill(Color.red))
             .foregroundStyle(.white)
-            .accessibilityLabel(Text("\(display) unread"))
+            .accessibilityLabel(Text(I18n.tr("home.badge.unread", display)))
     }
     private var display: String {
         count > 99 ? "99+" : "\(count)"
@@ -837,7 +831,7 @@ private struct UnreadBadge: View {
 private struct StatusPill: View {
     let status: String
     var body: some View {
-        Text(status.capitalized)
+        Text(InvoiceStatusLocalizer.title(for: status))
             .font(.caption2).bold()
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -979,11 +973,11 @@ private struct RecentInvoicesSheet: View {
     // MARK: - Small helpers
     private func title(for f: Filter) -> String {
         switch f {
-        case .all: return "All"
-        case .open: return "Open"
-        case .sent: return "Sent"
-        case .paid: return "Paid"
-        case .overdue: return "Overdue"
+        case .all: return I18n.tr("status.all")
+        case .open: return I18n.tr("status.open")
+        case .sent: return I18n.tr("status.sent")
+        case .paid: return I18n.tr("status.paid")
+        case .overdue: return I18n.tr("status.overdue")
         }
     }
     private func icon(for f: Filter) -> String {
@@ -996,7 +990,9 @@ private struct RecentInvoicesSheet: View {
         }
     }
     private var emptyCopy: String {
-        search.isEmpty ? "No invoices for this filter yet" : "No results for “\(search)”"
+        search.isEmpty
+            ? I18n.tr("home.sheet.empty.invoices_filter")
+            : I18n.tr("home.sheet.empty.search_results", search)
     }
 }
 
@@ -1033,7 +1029,7 @@ private struct InvoiceCardRow: View {
                 Text(currency(inv.total))
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()
-                StatusPillSmall(text: displayStatus(inv))
+                StatusPillSmall(status: statusKey(inv))
             }
 
             // Chevron INSIDE the card
@@ -1056,9 +1052,9 @@ private struct InvoiceCardRow: View {
     private var gradient: LinearGradient {
         LinearGradient(colors: [.blue, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
-    private func displayStatus(_ inv: InvoiceRow) -> String {
-        if inv.status == "open", inv.sent_at != nil { return "Sent" }
-        return inv.status.capitalized
+    private func statusKey(_ inv: InvoiceRow) -> String {
+        if inv.status == "open", inv.sent_at != nil { return "sent" }
+        return inv.status
     }
     private func currency(_ total: Double?) -> String {
         let n = NumberFormatter()
@@ -1070,9 +1066,9 @@ private struct InvoiceCardRow: View {
 
 // small chip to match Home
 private struct StatusPillSmall: View {
-    let text: String
+    let status: String
     var body: some View {
-        Text(text)
+        Text(InvoiceStatusLocalizer.title(for: status))
             .font(.caption2).bold()
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(color.opacity(0.15))
@@ -1080,7 +1076,7 @@ private struct StatusPillSmall: View {
             .clipShape(Capsule())
     }
     private var color: Color {
-        switch text.lowercased() {
+        switch status.lowercased() {
         case "paid": return .green
         case "overdue": return .red
         case "sent": return .blue
@@ -1094,7 +1090,7 @@ private struct StatusPillSmall: View {
 private struct StatusChip: View {
     let status: String
     var body: some View {
-        Text(status.capitalized)
+        Text(InvoiceStatusLocalizer.title(for: status))
             .font(.caption2)
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(color.opacity(0.15))
@@ -1205,8 +1201,11 @@ private struct RecentActivitySheet: View {
                 if filtered.isEmpty {
                     VStack(spacing: 8) {
                         Image(systemName: "bell.slash").font(.title2)
-                        Text(search.isEmpty ? "No activity for this filter yet"
-                                            : "No results for “\(search)”")
+                        Text(
+                            search.isEmpty
+                                ? I18n.tr("home.sheet.empty.activity_filter")
+                                : I18n.tr("home.sheet.empty.search_results", search)
+                        )
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -1270,13 +1269,13 @@ private struct RecentActivitySheet: View {
 
     private func titleFor(filter f: Filter) -> String {
         switch f {
-        case .all: return "All"
-        case .created: return "Created"
-        case .sent: return "Sent"
-        case .opened: return "Opened"
-        case .paid: return "Paid"
-        case .dueSoon: return "Due Soon"
-        case .overdue: return "Overdue"
+        case .all: return I18n.tr("status.all")
+        case .created: return I18n.tr("activity.created")
+        case .sent: return I18n.tr("status.sent")
+        case .opened: return I18n.tr("activity.opened")
+        case .paid: return I18n.tr("status.paid")
+        case .dueSoon: return I18n.tr("activity.due_soon")
+        case .overdue: return I18n.tr("status.overdue")
         }
     }
     private func iconFor(filter f: Filter) -> String {
@@ -1315,8 +1314,8 @@ private struct RecentActivitySheet: View {
         f.timeZone = .current
         f.dateFormat = "yyyy-MM-dd"
         guard let d = f.date(from: key) else { return key }
-        if Calendar.current.isDateInToday(d) { return "Today" }
-        if Calendar.current.isDateInYesterday(d) { return "Yesterday" }
+        if Calendar.current.isDateInToday(d) { return I18n.tr("home.day.today") }
+        if Calendar.current.isDateInYesterday(d) { return I18n.tr("home.day.yesterday") }
         let out = DateFormatter()
         out.dateStyle = .medium
         out.timeStyle = .none
@@ -1388,7 +1387,7 @@ private struct ActivityCardRow: View {
 
             // RIGHT: Event type chip + chevron (inside the card)
             HStack(spacing: 8) {
-                StatusPillTiny(text: eventDisplay(a.event))
+                StatusPillTiny(event: a.event)
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -1436,15 +1435,7 @@ private struct ActivityCardRow: View {
     }
 
     private func eventDisplay(_ event: String) -> String {
-        switch event.lowercased() {
-        case "created":  return "Created"
-        case "sent":     return "Sent"
-        case "opened":   return "Opened"
-        case "paid":     return "Paid"
-        case "overdue":  return "Overdue"
-        case "due_soon": return "Due Soon"
-        default:          return event.capitalized
-        }
+        ActivityEventLocalizer.title(for: event)
     }
 
     private func relativeTime(_ s: String) -> String {
@@ -1466,9 +1457,9 @@ private struct ActivityCardRow: View {
 
 // tiny chip used on activity rows
 private struct StatusPillTiny: View {
-    let text: String
+    let event: String
     var body: some View {
-        Text(text)
+        Text(ActivityEventLocalizer.title(for: event))
             .font(.caption2).bold()
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(color.opacity(0.15))
@@ -1476,10 +1467,13 @@ private struct StatusPillTiny: View {
             .clipShape(Capsule())
     }
     private var color: Color {
-        switch text.lowercased() {
+        switch event.lowercased() {
         case "paid": return .green
         case "overdue": return .red
         case "sent": return .blue
+        case "created": return .blue
+        case "opened": return .purple
+        case "due_soon": return .orange
         default: return .gray
         }
     }

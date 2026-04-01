@@ -92,6 +92,7 @@ struct InvoiceDraft {
     var paymentMethod: InvoicePaymentMethod = .none
     var paymentDetails: String = ""
     var paymentAddress: String = ""
+    var invoiceLanguage: InvoiceContentLanguage = .english
     var items: [LineItemDraft] = []
 
     var paymentInfo: InvoicePaymentInfo? {
@@ -152,6 +153,7 @@ struct NewInvoiceView: View {
     var onSaved: (InvoiceDraft) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(AppLanguage.storageKey) private var appLanguageCode: String = AppLanguage.defaultRawValue
     @State private var isShowingPreview = false
     @State private var pdfData: Data? = nil
     @State private var isGeneratingPDF = false
@@ -196,6 +198,14 @@ struct NewInvoiceView: View {
         }
     }
 
+    private var appLanguage: AppLanguage {
+        AppLanguage(rawValue: appLanguageCode) ?? .english
+    }
+
+    private var invoiceLanguageWarning: String? {
+        draft.invoiceLanguage.mismatchWarning(appLanguage: appLanguage)
+    }
+
     private var paymentMethodOptions: [InvoicePaymentMethod] {
         var methods: [InvoicePaymentMethod] = [.none, .zelle, .check]
         if stripeConnectedForPaymentMethod {
@@ -210,6 +220,9 @@ struct NewInvoiceView: View {
         self.preselectedClient = preselectedClient
         self.lockClient = lockClient
         self.onSaved = onSaved
+        let defaultInvoiceLanguage = InvoiceContentLanguage(
+            rawValue: UserDefaults.standard.string(forKey: InvoiceContentLanguage.storageKey) ?? ""
+        ) ?? .english
 
         let initial = InvoiceDraft(
             number: "",
@@ -221,6 +234,7 @@ struct NewInvoiceView: View {
             paymentMethod: .none,
             paymentDetails: "",
             paymentAddress: "",
+            invoiceLanguage: defaultInvoiceLanguage,
             items: []
         )
         _draft = State(initialValue: initial)
@@ -281,6 +295,14 @@ struct NewInvoiceView: View {
                 .listRowBackground(Color.clear)
             } header: {
                 Text("Invoice")
+            }
+
+            if let warning = invoiceLanguageWarning {
+                Section {
+                    Label(warning, systemImage: "globe")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section {
@@ -417,7 +439,12 @@ struct NewInvoiceView: View {
         ItemPickerSheet(
             viewModel: itemVM,
             currentItemIndex: draft.items.count + 1,
-            presets: ["Service call", "Labor hour", "Materials", "Cleanup"],
+            presets: [
+                I18n.tr("invoice.new.preset.service_call"),
+                I18n.tr("invoice.new.preset.labor_hour"),
+                I18n.tr("invoice.new.preset.materials"),
+                I18n.tr("invoice.new.preset.cleanup")
+            ],
             onAdd: { newItem in
                 var item = newItem
                 let trimmedTitle = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -438,6 +465,13 @@ struct NewInvoiceView: View {
         NavigationStack {
             Form {
                 Section {
+                    Picker("Invoice language", selection: $draft.invoiceLanguage) {
+                        ForEach(InvoiceContentLanguage.allCases) { language in
+                            Text(language.menuTitle).tag(language)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
                     DatePicker("Due date", selection: $draft.dueDate, displayedComponents: .date)
                     TextField("Invoice #", text: $draft.number)
                         .textInputAutocapitalization(.never)
@@ -450,6 +484,11 @@ struct NewInvoiceView: View {
                             .multilineTextAlignment(.trailing)
                             .frame(width: 80)
                     }
+                }
+                Section {
+                    Text("Language controls PDF labels and customer-facing send text.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 Section {
                     TextField("Notes", text: $draft.notes, axis: .vertical)
@@ -512,11 +551,12 @@ struct NewInvoiceView: View {
                             }
 
                             Section("Details") {
-                                Text("Invoice #: \(draft.number.isEmpty ? "—" : draft.number)")
-                                Text("Due: \(draft.dueDate.formatted(date: .abbreviated, time: .omitted))")
-                                Text("Tax: \(draft.taxPercent, format: .number)\u{202F}%")
+                                Text(I18n.tr("invoice.new.preview.line.invoice_number", draft.number.isEmpty ? "—" : draft.number))
+                                Text(I18n.tr("invoice.new.preview.line.due_date", draft.dueDate.formatted(date: .abbreviated, time: .omitted)))
+                                Text(I18n.tr("invoice.new.preview.line.tax_percent", draft.taxPercent.formatted(.number)))
+                                Text(I18n.tr("invoice.new.preview.line.language", draft.invoiceLanguage.menuTitle))
                                 if let payment = draft.paymentInfo, payment.method != .none {
-                                    Text("Payment: \(payment.displayLine)")
+                                    Text(I18n.tr("invoice.new.preview.line.payment", payment.displayLine))
                                 }
                             }
 
@@ -526,7 +566,7 @@ struct NewInvoiceView: View {
                                 } else {
                                     ForEach(Array(draft.items.enumerated()), id: \.element.id) { index, item in
                                         VStack(alignment: .leading, spacing: 4) {
-                                            Text(item.title.isEmpty ? "Item \(index + 1)" : item.title)
+                                            Text(item.title.isEmpty ? I18n.tr("invoice.new.preview.item.fallback", index + 1) : item.title)
                                                 .font(.headline)
                                             if !item.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                                 Text(item.description)
@@ -534,7 +574,7 @@ struct NewInvoiceView: View {
                                                     .foregroundStyle(.secondary)
                                             }
                                             HStack {
-                                                Text("Qty: \(item.quantity)")
+                                                Text(I18n.tr("invoice.new.preview.item.quantity", item.quantity))
                                                 Spacer()
                                                 Text(item.unitPrice, format: .currency(code: draft.currency))
                                             }
@@ -1053,7 +1093,7 @@ private struct SelectedClientCard: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("Client \(client.name)"))
+        .accessibilityLabel(Text(I18n.tr("invoice.new.accessibility.client", client.name)))
     }
 
     private func initials(from name: String) -> String {
@@ -1104,7 +1144,7 @@ private struct PlaceholderClientCard: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("No client selected. Tap to choose a client."))
+        .accessibilityLabel(Text(I18n.tr("invoice.new.accessibility.no_client")))
     }
 }
 
@@ -1136,7 +1176,7 @@ private struct DueDateRow: View {
                 .strokeBorder(Color.black.opacity(colorScheme == .light ? 0.16 : 0.35))
         )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .accessibilityLabel(Text("Due date \(date.formatted(date: .abbreviated, time: .omitted))"))
+        .accessibilityLabel(Text(I18n.tr("invoice.new.accessibility.due_date", date.formatted(date: .abbreviated, time: .omitted))))
     }
 }
 
@@ -1245,7 +1285,18 @@ private struct InvoiceDetailsCard: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("Due date \(formattedDue). Invoice number \(invoiceNumber.isEmpty ? "unknown" : invoiceNumber).\(taxPercent > 0 ? " Tax \(String(format: "%.2f", taxPercent)) percent amount \(currency(taxAmount))." : "")"))
+        .accessibilityLabel(Text(accessibilitySummary))
+    }
+
+    private var accessibilitySummary: String {
+        let normalizedInvoiceNumber = invoiceNumber.isEmpty
+            ? I18n.tr("invoice.new.accessibility.invoice_number_unknown")
+            : invoiceNumber
+        let base = I18n.tr("invoice.new.accessibility.invoice_details.base", formattedDue, normalizedInvoiceNumber)
+        guard taxPercent > 0 else { return base }
+        let taxValue = taxPercent.formatted(.number.precision(.fractionLength(2)))
+        let taxSentence = I18n.tr("invoice.new.accessibility.invoice_details.tax", taxValue, currency(taxAmount))
+        return "\(base) \(taxSentence)"
     }
 }
 
@@ -1257,7 +1308,7 @@ private struct NotesRow: View {
 
     private var preview: String {
         let trimmed = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return "Add a note" }
+        if trimmed.isEmpty { return I18n.tr("invoice.new.notes.preview.empty") }
         let firstLine = trimmed.split(separator: "\n").first.map(String.init) ?? trimmed
         return firstLine.count > 40 ? String(firstLine.prefix(40)) + "…" : firstLine
     }
@@ -1293,7 +1344,13 @@ private struct NotesRow: View {
         }
         .buttonStyle(.plain)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .accessibilityLabel(Text(noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Notes. Add a note." : "Notes. \(preview)"))
+        .accessibilityLabel(
+            Text(
+                noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? I18n.tr("invoice.new.accessibility.notes.empty")
+                    : I18n.tr("invoice.new.accessibility.notes.value", preview)
+            )
+        )
     }
 }
 
@@ -1304,7 +1361,7 @@ private struct PaymentMethodRow: View {
 
     private var preview: String {
         let value = paymentText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return value.isEmpty ? "Select a method" : value
+        return value.isEmpty ? I18n.tr("invoice.new.payment.preview.empty") : value
     }
 
     var body: some View {
@@ -1339,7 +1396,13 @@ private struct PaymentMethodRow: View {
         }
         .buttonStyle(.plain)
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .accessibilityLabel(Text((paymentText ?? "").isEmpty ? "Payment method. Select a method." : "Payment method. \(preview)"))
+        .accessibilityLabel(
+            Text(
+                (paymentText ?? "").isEmpty
+                    ? I18n.tr("invoice.new.accessibility.payment.empty")
+                    : I18n.tr("invoice.new.accessibility.payment.value", preview)
+            )
+        )
     }
 }
 
@@ -1851,7 +1914,11 @@ private struct ItemPreviewCard: View {
         VStack(alignment: .leading, spacing: 16) {
             // TITLE — collapsible button → field
             if isTitleOpen {
-                FloatingField(title: "Item", hintText: "Title (optional)", text: $title)
+                FloatingField(
+                    title: I18n.tr("invoice.new.item.field"),
+                    hintText: I18n.tr("invoice.new.item.hint.title_optional"),
+                    text: $title
+                )
                     .transition(.move(edge: .top).combined(with: .opacity))
             } else {
                 Button {
@@ -1861,7 +1928,11 @@ private struct ItemPreviewCard: View {
                         Image(systemName: "text.cursor")
                             .font(.headline)
                             .foregroundStyle(Color.accentColor)
-                        Text(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add title" : String(title.prefix(60)))
+                        Text(
+                            title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? I18n.tr("invoice.new.item.add_title")
+                                : String(title.prefix(60))
+                        )
                             .font(.headline)
                             .lineLimit(1)
                         Spacer()
@@ -1883,8 +1954,8 @@ private struct ItemPreviewCard: View {
             // DESCRIPTION — collapsible button → multiline editor (no sheet)
             if isDescOpen {
                 FloatingMultilineField(
-                    title: "Description",
-                    hintText: "Describe the work (optional)",
+                    title: I18n.tr("invoice.new.item.description"),
+                    hintText: I18n.tr("invoice.new.item.hint.description_optional"),
                     text: $description,
                     minHeight: 120
                 )
@@ -1897,7 +1968,11 @@ private struct ItemPreviewCard: View {
                         Image(systemName: "square.and.pencil")
                             .font(.headline)
                             .foregroundStyle(Color.accentColor)
-                        Text(description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Add description" : String(description.prefix(60)))
+                        Text(
+                            description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? I18n.tr("invoice.new.item.add_description")
+                                : String(description.prefix(60))
+                        )
                             .font(.headline)
                             .foregroundStyle(.primary)
                             .lineLimit(1)
@@ -2092,7 +2167,7 @@ private struct ItemPreviewCard: View {
 
             // PRICE — always inside the card so it visually belongs to the item
             VStack(alignment: .leading, spacing: 8) {
-                Text(quantity > 1 ? "Unit price" : "Price")
+                Text(quantity > 1 ? I18n.tr("Unit price") : I18n.tr("Price"))
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
 
@@ -2750,16 +2825,16 @@ private struct TotalsCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            row("Subtotal", currency(subTotal))
+            row(I18n.tr("Subtotal"), currency(subTotal))
             Divider().padding(.horizontal, 14)
-            row("Tax", currency(taxAmount))
+            row(I18n.tr("Tax"), currency(taxAmount))
             // Bold divider before Total
             Rectangle()
                 .fill(Color.black.opacity(0.12))
                 .frame(height: 2)
                 .padding(.top, 8)
                 .padding(.horizontal, 14)
-            row("Total", currency(total), isBold: true)
+            row(I18n.tr("Total"), currency(total), isBold: true)
                 .padding(.bottom, 6)
         }
         .padding(.top, 8)

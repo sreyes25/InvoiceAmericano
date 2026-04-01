@@ -611,7 +611,9 @@ struct InvoiceDetailView: View {
         do {
             // 1) Decide whether this invoice should use Stripe checkout when sending.
             guard let d = detail else { return }
-            let payment = InvoiceNotesCodec.extract(from: d.notes).payment
+            let parsedNotes = InvoiceNotesCodec.extract(from: d.notes)
+            let payment = parsedNotes.payment
+            let invoiceLanguage = parsedNotes.invoiceLanguage ?? .english
             let shouldCreateStripeLink = stripeConnected && (payment == nil || payment?.method == .stripe)
 
             // Legacy invoices (no payment metadata) keep existing behavior when Stripe is connected.
@@ -644,28 +646,11 @@ struct InvoiceDetailView: View {
 
             // 4) Prepare share text (professional default message)
             let clientName = d.client?.name ?? "there"
-            let message: String
-            if payURL != nil {
-                message = """
-            Hi \(clientName),
-
-            Please find your invoice #\(d.number) attached.
-
-            A secure payment link is attached to this message.
-
-            Thank you.
-            """
-                        } else {
-                            message = """
-            Hi \(clientName),
-
-            Please find your invoice #\(d.number) attached.
-
-            Let me know if you have any questions.
-
-            Thank you.
-            """
-            }
+            let message = invoiceLanguage.sendMessage(
+                clientName: clientName,
+                invoiceNumber: d.number,
+                includesPaymentLink: payURL != nil
+            )
 
             // 5) Two-phase share payload
             await MainActor.run { self.sharePayload = nil }
@@ -830,10 +815,10 @@ struct InvoiceDetailView: View {
 
     private func statusDescription(for status: String) -> String {
         switch status.lowercased() {
-        case "open": return "Invoice created"
-        case "sent": return "Invoice link sent to client"
-        case "paid": return "Client paid invoice in full"
-        case "overdue": return "Due date passed and invoice is unpaid"
+        case "open": return I18n.tr("invoice.status_description.open")
+        case "sent": return I18n.tr("invoice.status_description.sent")
+        case "paid": return I18n.tr("invoice.status_description.paid")
+        case "overdue": return I18n.tr("invoice.status_description.overdue")
         default: return ""
         }
     }
@@ -941,9 +926,9 @@ private struct ProcessingFeeDisclaimerSheet: View {
     private var message: String {
         let num = invoiceNumber ?? ""
         if num.isEmpty {
-            return "When you include a payment link, your client will pay the invoice total plus a $1 processing fee."
+            return I18n.tr("invoice.processing_fee.generic")
         }
-        return "When you include a payment link, your client will pay invoice #\(num) plus a $1 processing fee."
+        return I18n.tr("invoice.processing_fee.with_number", num)
     }
 }
 
@@ -952,7 +937,7 @@ private struct ProcessingFeeDisclaimerSheet: View {
 private struct StatusChip: View {
     let status: String
     var body: some View {
-        Text(status.capitalized)
+        Text(InvoiceStatusLocalizer.title(for: status))
             .font(.caption2)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)

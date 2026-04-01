@@ -30,6 +30,7 @@ struct InvoicePDFSnapshot {
     let number: String
     let status: String
     let currency: String
+    let invoiceLanguage: InvoiceContentLanguage
     let subtotal: Double
     let tax: Double
     let total: Double
@@ -52,6 +53,8 @@ extension InvoicePDFSnapshot {
         self.number   = detail.number
         self.status   = detail.status
         self.currency = (detail.currency ?? "USD").uppercased()
+        let parsedNotes = InvoiceNotesCodec.extract(from: detail.notes)
+        self.invoiceLanguage = parsedNotes.invoiceLanguage ?? .english
 
         self.subtotal = detail.subtotal ?? 0
         self.tax      = detail.tax ?? 0
@@ -60,7 +63,6 @@ extension InvoicePDFSnapshot {
         self.issuedAt = Self.parseSupabaseDate(detail.issued_at ?? detail.created_at)
         self.dueDate  = Self.parseSupabaseDate(detail.dueDate)
 
-        let parsedNotes = InvoiceNotesCodec.extract(from: detail.notes)
         self.notes = parsedNotes.userNotes
         self.payment = parsedNotes.payment
 
@@ -93,6 +95,7 @@ extension InvoicePDFSnapshot {
         self.number   = draft.number.isEmpty ? "—" : draft.number
         self.status   = "draft"
         self.currency = draft.currency.uppercased()
+        self.invoiceLanguage = draft.invoiceLanguage
 
         self.subtotal = draft.subTotal
         self.tax      = draft.taxAmount
@@ -102,7 +105,11 @@ extension InvoicePDFSnapshot {
         self.dueDate  = draft.dueDate
 
         let parsedNotes = InvoiceNotesCodec.extract(
-            from: InvoiceNotesCodec.compose(userNotes: draft.notes, payment: draft.paymentInfo)
+            from: InvoiceNotesCodec.compose(
+                userNotes: draft.notes,
+                payment: draft.paymentInfo,
+                invoiceLanguage: draft.invoiceLanguage
+            )
         )
         self.notes = parsedNotes.userNotes
         self.payment = parsedNotes.payment
